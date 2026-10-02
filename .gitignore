@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Gerçek yapılandırma (cihaz IP'leri, istisnalar) - yalnızca config.example.yaml repoda kalır
+config.yaml
+.env
+
+# Tarama geçmişi ve raporlar (müşteri bulguları içerir)
+state/
+reports/
+reports-demo/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db

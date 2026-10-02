@@ -1,0 +1,27 @@
+# Cihaz gerektirmeyen demo yapılandırması: 3 sahte WAF cihazı, ~23 müşteri partition'ı
+devices:
+  - {name: waf01, mock: true}
+  - {name: waf02, mock: true}
+  - {name: waf03, mock: true}
+
+scan:
+  exclude_partitions: ["Common"]
+  only_waf_partitions: true
+  no_waf_exempt_ports: [80]
+
+customers:
+  P_ACME: "ACME Teknoloji A.Ş."
+  P_BETA_BANK: "Beta Bank"
+  P_CITY_MUN: "Şehir Belediyesi"
+
+suppressions:
+  - check: "WAF-009"
+    partition: "*"
+    reason: "Tüm müşteriler CDN arkasında - risk kabulü RSK-2026-14"
+    until: 2027-01-01
+
+output:
+  dir: reports-demo
+  formats: [html, xlsx, json, csv]
+
+state_db: state/demo.db

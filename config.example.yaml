@@ -1,0 +1,70 @@
+# F5 WAF Healthcheck yapılandırması
+# Şifreler ${ORTAM_DEGISKENI} şeklinde ortam değişkeninden okunur; dosyaya düz yazmayın.
+
+defaults:
+  username: ${F5_USER}          # Tüm partition'larda en az "Auditor" rolü olan salt-okunur kullanıcı
+  password: ${F5_PASS}
+  login_provider: tmos          # RADIUS/TACACS/LDAP ise ilgili provider adı
+  verify_ssl: true              # self-signed ise false ya da CA bundle yolu: /path/ca.pem
+  timeout: 60
+
+devices:
+  - name: waf01
+    host: 10.10.10.11
+  - name: waf02
+    host: 10.10.10.12
+  - name: waf03
+    host: 10.10.10.13
+    # username/password cihaz bazında ezilebilir
+
+scan:
+  include_partitions: ["*"]
+  exclude_partitions: ["Common", "Drafts"]   # Common'u da taramak isterseniz buradan çıkarın
+  device_workers: 3            # aynı anda taranan cihaz
+  policy_workers: 4            # cihaz başına paralel ASM policy isteği (ASM REST yavaştır, abartmayın)
+  only_waf_partitions: true    # LTM-003'ü yalnızca WAF policy'si olan partition'larda uygula
+  no_waf_exempt_ports: [80]    # LTM-003: WAF'sız olması normal portlar (80 = yalnızca HTTPS redirect iRule'lu VS'ler)
+  no_waf_include_non_http: true  # HTTP profili olmayan (L4 / SSL passthrough) WAF'sız VS'leri de listele
+  disabled_checks: []          # ör. ["LTM-005", "WAF-009"]
+
+thresholds:
+  transparent_max_days: 14
+  transparent_critical_days: 60
+  staging_max_days: 7
+  staging_min_signatures: 1
+  disabled_signatures_max: 50
+  signature_update_max_days: 30
+  cert_expiry_warn_days: 60
+  cert_expiry_high_days: 30
+  pool_partial_down_ratio: 0.5
+
+# Müşteri/partition bazında eşik istisnası (joker desteklenir)
+partition_overrides:
+  "P_ONBOARD_*":
+    transparent_max_days: 45     # yeni alınan müşterilere daha uzun learning süresi
+
+# Partition -> müşteri adı (raporda görünür)
+customers:
+  P_ACME: "ACME Teknoloji A.Ş."
+  P_BETA_BANK: "Beta Bank"
+
+# Engellenmemesi kritik sayılan violation'lar (WAF-006). Boş bırakılırsa varsayılan liste kullanılır.
+# critical_violations: ["Attack signature detected", "Evasion technique detected"]
+
+# Kabul edilmiş riskler. Süresi dolan istisna otomatik düşer ve bulgu tekrar aktif olur.
+suppressions:
+  - check: "WAF-001"
+    device: "waf02"
+    partition: "P_OPTIMA"
+    object: "*"
+    reason: "Müşteri talebiyle learning uzatıldı - CHG0012345"
+    until: 2026-10-31
+
+output:
+  dir: reports
+  formats: [html, xlsx, json, csv]
+
+state_db: state/waf_healthcheck.db
+
+api:
+  keys: ["${F5WAF_API_KEY}"]      # boşsa API anahtarsız çalışır
