@@ -14,7 +14,8 @@ SEV_COLORS = {"CRITICAL": "B3132B", "HIGH": "E0531F", "MEDIUM": "E0A800", "LOW":
 HDR_FILL = PatternFill("solid", fgColor="1F2A44")
 HDR_FONT = Font(color="FFFFFF", bold=True)
 
-FINDING_COLS = [("severity", "Önem", 11), ("status", "Durum", 12), ("check_id", "Kontrol", 10),
+FINDING_COLS = [("severity", "Önem", 11), ("status", "Durum", 12), ("workflow_status", "İş durumu", 12),
+                ("assigned_to", "Sorumlu", 16), ("check_id", "Kontrol", 10),
                 ("title", "Başlık", 38), ("device", "Cihaz", 14), ("partition", "Partition", 18),
                 ("customer", "Müşteri", 22), ("object_type", "Nesne tipi", 13), ("object_name", "Nesne", 42),
                 ("detail", "Detay", 60), ("recommendation", "Öneri", 60), ("first_seen", "İlk görülme", 20)]
@@ -98,6 +99,45 @@ def write_xlsx(report: dict, path: str) -> str:
     supp = [f for f in report["findings"] if f["suppressed"]]
     _sheet(wb, "İstisnalar", heads + ["İstisna nedeni"],
            [r + [f["suppress_reason"]] for r, f in zip(_finding_rows(supp), supp)], widths + [40])
+    MODE_TR = {"blocking": "Blocking", "transparent": "Transparent", "learning": "Learning", "off": "Kapalı",
+               "network": "Network DoS", "unknown": "Bilinmiyor"}
+    prot = report.get("protections") or []
+    for kind, title in (("dos", "DoS Protection"), ("bot", "Bot Protection")):
+        rows = []
+        for r in sorted(prot, key=lambda r: (r[kind] is None, r["device"], r["partition"], r["virtual"])):
+            if not r[kind] and not r["eligible"]:
+                continue
+            k = r[kind] or {}
+            extra = (", ".join(f"{a}: {MODE_TR.get(b, b)}" for a, b in (k.get("detections") or {}).items())
+                     if kind == "dos" else (k.get("template") or "") + (" (DoS profili - legacy)" if k.get("source") == "dos-legacy" else ""))
+            rows.append([r["device"], r["partition"], r["customer"], r["virtual"], r["destination"],
+                         "Evet" if r[kind] else "Hayır", k.get("profile", ""), MODE_TR.get(k.get("mode"), k.get("mode", "")),
+                         extra, r["waf_policy"] or "—"])
+        _sheet(wb, title, ["Cihaz", "Partition", "Müşteri", "Virtual Server", "Hedef", "Kullanıyor",
+                           "Profil", "Mod", "Detay", "WAF Policy"], rows, [10, 18, 24, 40, 22, 10, 36, 13, 40, 34])
+
+    pol = report.get("asm_policies") or []
+    if pol:
+        ws = _sheet(wb, "ASM Policyler",
+                    ["Cihaz", "Cihaz IP", "Partition", "Müşteri", "Policy", "Mod", "Aktif", "Apply bekliyor",
+                     "Bağlı VS sayısı", "Virtual server'lar", "Son değişiklik", "Transparent (gün)", "Learning",
+                     "Staging'deki imza", "Devre dışı imza", "Açık bulgu"],
+                    [[r["device"], r["device_host"], r["partition"], r["customer"], r["full_path"],
+                      {"blocking": "Blocking", "transparent": "Transparent"}.get(r["mode"], r["mode"]),
+                      "Evet" if r["active"] else "Hayır", "Evet" if r["modified"] else "Hayır",
+                      len(r["virtual_servers"]),
+                      "\n".join(f"{v['name']} ({v['destination']})" for v in r["virtual_servers"]) or "—",
+                      (r["last_change"] or "")[:16].replace("T", " "), r.get("transparent_days") or "",
+                      r["learning_mode"] or "", r["staged_signatures"], r["disabled_signatures"],
+                      r.get("findings_total", 0)]
+                     for r in sorted(pol, key=lambda r: (r["device"], r["partition"], r["full_path"]))],
+                    [10, 14, 18, 24, 40, 12, 7, 9, 9, 60, 17, 10, 11, 10, 10, 9])
+        for row in ws.iter_rows(min_row=2):
+            row[9].alignment = Alignment(vertical="top", wrap_text=True)
+        ws.conditional_formatting.add(f"F2:F{max(2, ws.max_row)}", CellIsRule(
+            operator="equal", formula=['"Transparent"'], fill=PatternFill("solid", fgColor="F8F1DC"),
+            font=Font(color="9A6F00", bold=True)))
+
     _sheet(wb, "Kontrol Kataloğu", ["ID", "Başlık", "Kategori", "Açıklama", "Öneri"],
            [[c["id"], c["title"], c["category"], c["description"], c["recommendation"]] for c in report["catalog"]],
            [10, 40, 16, 70, 70])

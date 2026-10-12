@@ -1,8 +1,8 @@
 # Cihaz gerektirmeyen demo yapılandırması: 3 sahte WAF cihazı, ~23 müşteri partition'ı
 devices:
-  - {name: waf01, mock: true}
-  - {name: waf02, mock: true}
-  - {name: waf03, mock: true}
+  - {name: waf01, host: 10.10.10.11, mock: true}   # demo: IP yalnızca gösterim için, bağlanılmaz
+  - {name: waf02, host: 10.10.10.12, mock: true}
+  - {name: waf03, host: 10.10.10.13, mock: true}
 
 scan:
   exclude_partitions: ["Common"]

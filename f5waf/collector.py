@@ -79,6 +79,8 @@ class DeviceSnapshot:
     failover_status: str = ""
     signature_update: datetime | None = None
     signature_update_name: str = ""
+    dos_profiles: dict[str, dict] = field(default_factory=dict)   # fullPath -> profil
+    bot_profiles: dict[str, dict] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     def by_partition(self, items: list[dict]) -> dict[str, list[dict]]:
@@ -145,6 +147,14 @@ class Collector:
             snap.failover_status = v.get("status") or snap.failover_status
 
         self._collect_signature_update(snap)
+
+        # DoS / Bot Protection profilleri (AFM/ASM provision değilse 404 -> boş)
+        for p in self._safe(snap, "dos profiles", lambda: c.get_items(
+                "/mgmt/tm/security/dos/profile", {"expandSubcollections": "true"}, allow_404=True), []):
+            snap.dos_profiles[p.get("fullPath") or f"/{p.get('partition')}/{p.get('name')}"] = p
+        for p in self._safe(snap, "bot profiles", lambda: c.get_items(
+                "/mgmt/tm/security/bot-defense/profile", allow_404=True), []):
+            snap.bot_profiles[p.get("fullPath") or f"/{p.get('partition')}/{p.get('name')}"] = p
 
         policies = [p for p in self._safe(snap, "asm policies", lambda: c.get_items(ASM), []) if self._keep(p)]
         with ThreadPoolExecutor(max_workers=self.policy_workers) as ex:

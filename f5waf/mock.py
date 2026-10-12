@@ -100,6 +100,7 @@ class MockClient:
         self.virtuals.append({"name": "vs_dns", "partition": "Common", "fullPath": "/Common/vs_dns",
                               "pool": "", "rules": ["/Common/dns_rule"], "profilesReference": {"items": [{"fullPath": "/Common/udp"}]}})
         self.vstats["/Common/vs_dns"] = {"status.availabilityState": "available", "status.enabledState": "enabled"}
+        self._make_protections(profile)
         self.asu_days = [8, 75, 140][idx]
         self.sync = ["In Sync", "Changes Pending", "In Sync"][idx]
         self.version = ["16.1.4", "17.1.1", "15.1.10"][idx]
@@ -126,6 +127,32 @@ class MockClient:
             "staged": rnd.choice([0, 0, 0, 3, 12, 48, 260]),
             "disabled": rnd.choice([0, 2, 5, 14, 75, 180]),
         }
+
+    def _make_protections(self, profile):
+        """Müşterilerin bir kısmına DoS / Bot profili bağla (ayrı RNG: diğer demo verisi değişmesin)."""
+        r = random.Random(profile + "-prot")
+        self.dos_profiles, self.bot_profiles = [], []
+        for v in self.virtuals:
+            if v["fullPath"].endswith("_80") or v["partition"] == "Common":
+                continue
+            items = v["profilesReference"]["items"]
+            if r.random() < 0.55:
+                name = f"dos_{v['name']}"
+                app = r.random() < 0.8
+                self.dos_profiles.append({
+                    "name": name, "partition": v["partition"], "fullPath": f"/{v['partition']}/{name}",
+                    **({"applicationReference": {"items": [{
+                        "name": name,
+                        "tpsBased": {"mode": r.choice(["blocking", "blocking", "transparent", "off"])},
+                        "stressBased": {"mode": r.choice(["blocking", "transparent", "off"])}}]}} if app else {})})
+                items.append({"fullPath": f"/{v['partition']}/{name}"})
+            if r.random() < 0.4:
+                name = f"bot_{v['name']}"
+                self.bot_profiles.append({"name": name, "partition": v["partition"],
+                                          "fullPath": f"/{v['partition']}/{name}",
+                                          "enforcementMode": r.choice(["blocking", "blocking", "transparent"]),
+                                          "template": r.choice(["relaxed", "balanced", "strict"])})
+                items.append({"fullPath": f"/{v['partition']}/{name}"})
 
     # ------------------------------------------------------------------ API
     def logout(self):
@@ -162,6 +189,8 @@ class MockClient:
             "/mgmt/tm/ltm/profile/http": [{"fullPath": "/Common/http"}],
             "/mgmt/tm/ltm/profile/client-ssl": self.clientssl,
             "/mgmt/tm/sys/file/ssl-cert": self.certs,
+            "/mgmt/tm/security/dos/profile": self.dos_profiles,
+            "/mgmt/tm/security/bot-defense/profile": self.bot_profiles,
             "/mgmt/tm/asm/policies": self.policies,
             "/mgmt/tm/live-update/asm-attack-signatures/installations": [
                 {"filename": f"ASM-AttackSignatures_{(NOW - timedelta(days=self.asu_days)):%Y%m%d_%H%M%S}.im",

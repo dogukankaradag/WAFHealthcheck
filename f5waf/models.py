@@ -55,6 +55,8 @@ class DeviceResult:
     partitions: list[str] = field(default_factory=list)
     stats: dict[str, int] = field(default_factory=dict)
     duration_sec: float = 0.0
+    protections: list[dict] = field(default_factory=list)   # VS bazlı DoS / Bot envanteri
+    asm_policies: list[dict] = field(default_factory=list)  # ASM policy envanteri
 
 
 def _expand_env(value: Any) -> Any:

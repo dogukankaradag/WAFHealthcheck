@@ -10,7 +10,7 @@ import os
 
 from ..models import SEVERITIES
 
-CSV_FIELDS = ["severity", "status", "check_id", "title", "category", "device", "partition", "customer",
+CSV_FIELDS = ["severity", "status", "workflow_status", "assigned_to", "status_comment", "check_id", "title", "category", "device", "partition", "customer",
               "object_type", "object_name", "detail", "recommendation", "first_seen", "suppressed",
               "suppress_reason", "fingerprint"]
 

@@ -236,28 +236,199 @@ def test_reports_written(tmp_path):
 
 
 # -------------------------------------------------------------------- api
-def test_api(tmp_path, monkeypatch):
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    import importlib
+    import time as _t
+
     import yaml
     cfgp = tmp_path / "c.yaml"
-    cfgp.write_text(yaml.safe_dump({"devices": [{"name": "waf01", "mock": True}],
+    cfgp.write_text(yaml.safe_dump({"devices": [{"name": "waf01", "mock": True}, {"name": "waf02", "mock": True}],
+                                    "scan": {"exclude_partitions": ["Common"]},
                                     "state_db": str(tmp_path / "a.db"), "output": {"dir": str(tmp_path / "r")},
                                     "api": {"keys": ["k1"]}}))
     monkeypatch.setenv("F5WAF_CONFIG", str(cfgp))
-    import importlib
-
+    monkeypatch.setenv("F5WAF_ADMIN_PASSWORD", "Admin-Parola-1")
     import f5waf.api as api
     importlib.reload(api)
     from fastapi.testclient import TestClient
-    c = TestClient(api.app)
-    H = {"X-API-Key": "k1"}
-    assert c.get("/api/checks").status_code == 401
-    r = c.post("/api/scans", json={}, headers=H)
-    assert r.status_code == 202
-    sid = r.json()["scan_id"]
-    assert c.get(f"/api/scans/{sid}", headers=H).json()["status"] == "completed"
-    f = c.get("/api/scans/latest/findings", params={"min_severity": "HIGH"}, headers=H).json()
-    assert f["count"] > 0 and all(x["severity"] in ("CRITICAL", "HIGH") for x in f["findings"])
-    assert c.get("/api/partitions/P_ACME", headers=H).status_code == 200
-    for fmt in ("html", "xlsx", "json", "csv"):
-        assert c.get(f"/api/scans/{sid}/report.{fmt}", headers=H).status_code == 200
-    assert c.post("/api/scans", json={"devices": ["yok"]}, headers=H).status_code == 400
+    with TestClient(api.app) as c:
+        c.wait_scan = lambda: next(None for _ in range(200)
+                                   if not c.get("/api/scan/status", headers=c.H).json()["running"] or _t.sleep(0.05))
+        yield c
+
+
+def _login(c, user="admin", pw="Admin-Parola-1"):
+    r = c.post("/api/auth/login", data={"username": user, "password": pw})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def test_api_auth_and_roles(client):
+    c = client
+    assert c.get("/api/summary").status_code == 401
+    assert c.post("/api/auth/login", data={"username": "admin", "password": "yanlis"}).status_code == 401
+    H = c.H = _login(c)
+    assert c.get("/api/auth/me", headers=H).json()["role"] == "admin"
+    # readonly kullanıcı oluştur
+    assert c.post("/api/auth/users", json={"username": "ro", "password": "kisa"}, headers=H).status_code == 400
+    assert c.post("/api/auth/users", json={"username": "ro", "password": "Okuma-1234"}, headers=H).status_code == 201
+    RO = _login(c, "ro", "Okuma-1234")
+    assert c.post("/api/scan", json={}, headers=RO).status_code == 403
+    assert c.get("/api/auth/users", headers=RO).status_code == 403
+    # son admin silinemez / pasif yapılamaz
+    me = c.get("/api/auth/me", headers=H).json()
+    assert c.delete(f"/api/auth/users/{me['id']}", headers=H).status_code == 400
+    # API anahtarı admin sayılır
+    assert c.get("/api/auth/users", headers={"X-API-Key": "k1"}).status_code == 200
+    # brute force kilidi
+    for _ in range(5):
+        c.post("/api/auth/login", data={"username": "ro", "password": "x"})
+    assert c.post("/api/auth/login", data={"username": "ro", "password": "Okuma-1234"}).status_code == 429
+
+
+def test_api_scan_flow(client):
+    c = client
+    H = c.H = _login(c)
+    s = c.get("/api/summary", headers=H).json()
+    assert s["session_id"] is None
+    assert c.post("/api/scan", json={"device_ids": ["yok"]}, headers=H).status_code == 400
+    r = c.post("/api/scan", json={"device_ids": ["waf01"], "partitions": "P_ACME, P_D*"}, headers=H).json()
+    sid = r["session_id"]
+    c.wait_scan()
+    st = c.get("/api/scan/status", headers=H).json()
+    assert st["scan"]["id"] == sid and st["scan"]["status"] == "completed"
+    assert st["progress"]["waf01"]["state"] == "done"
+    hist = c.get("/api/scan/history", headers=H).json()
+    assert hist[0]["triggered_by"] == "admin" and hist[0]["request"]["partitions"] == ["P_ACME", "P_D*"]
+    devs = c.get("/api/devices", headers=H).json()
+    assert [d["id"] for d in devs] == ["waf01"]
+    assert {p["name"] for p in devs[0]["partitions"]} <= {"P_ACME", "P_DELTA_LOG", "(cihaz)"}
+    f = c.get("/api/findings", params={"severity": "high"}, headers=H).json()
+    assert f["total"] > 0 and all(x["severity"] == "HIGH" for x in f["findings"])
+    assert c.get("/api/partitions", headers=H).json()[0]["score"] > 0
+    assert c.get("/api/findings/check-names", headers=H).json()
+
+    # iş akışı: çözüldü -> açık listeden düşer, özet sayacı artar
+    total0 = c.get("/api/summary", headers=H).json()["total_findings"]
+    fp = f["findings"][0]["fingerprint"]
+    assert c.patch(f"/api/findings/{fp}/status", json={"status": "bad"}, headers=H).status_code == 400
+    assert c.patch(f"/api/findings/{fp}/status", json={"status": "resolved", "comment": "CHG1"},
+                   headers=H).status_code == 200
+    s = c.get("/api/summary", headers=H).json()
+    assert s["total_findings"] == total0 - 1 and s["resolved_count"] == 1
+    res = c.get("/api/findings", params={"status": "resolved"}, headers=H).json()["findings"]
+    assert res[0]["fingerprint"] == fp and res[0]["status_comment"] == "CHG1"
+
+    # ikinci tarama: geçmiş ve durum kalıcılığı
+    c.post("/api/scan", json={}, headers=H)
+    c.wait_scan()
+    assert len(c.get("/api/scan/history", headers=H).json()) == 2
+    assert c.get("/api/summary", headers=H).json()["resolved_count"] == 1
+    assert c.get("/api/summary", params={"session_id": sid}, headers=H).json()["session_id"] == sid
+
+    # raporlar (token query ile, tarayıcıdan indirme gibi)
+    tok = H["Authorization"][7:]
+    for fmt in ("html", "xlsx", "csv", "json"):
+        assert c.get(f"/api/report/{fmt}", params={"token": tok}).status_code == 200
+    assert c.get("/api/report/pdf", params={"token": tok}).status_code == 400
+    assert "WAF Healthcheck" in c.get("/").text
+
+
+def test_resolved_change_detection(tmp_path):
+    from f5waf.state import StateStore
+    st = StateStore(str(tmp_path / "x.db"))
+    f = {"fingerprint": "abc", "object_name": "/P/pol", "evidence": {"staged_signatures": 10, "observed_days": 3}}
+    st.set_status("abc", "resolved", comment=None, assigned_to=None, user="u", finding=f)
+    assert st.detect_changes([{**f, "evidence": {"staged_signatures": 10, "observed_days": 9}}]) == 0  # gün sayısı yok sayılır
+    assert st.detect_changes([{**f, "evidence": {"staged_signatures": 25, "observed_days": 9}}]) == 1
+    assert st.status_map()["abc"]["is_changed"] == 1
+
+
+def test_current_view_merges_partial_scans(client):
+    c = client
+    H = c.H = _login(c)
+    c.post("/api/scan", json={}, headers=H)
+    c.wait_scan()
+    full = c.get("/api/summary", headers=H).json()
+    parts_full = {(p["device"], p["partition"]) for p in c.get("/api/partitions", headers=H).json()}
+    # yalnızca tek müşteriyi yeniden tara
+    c.post("/api/scan", json={"device_ids": ["waf01"], "partitions": "P_ACME"}, headers=H)
+    c.wait_scan()
+    cur = c.get("/api/summary", headers=H).json()
+    assert cur["merged_from"] == 2
+    assert cur["partitions"] == full["partitions"]               # diğer müşteriler ekrandan düşmedi
+    assert cur["total_findings"] == full["total_findings"]       # mock deterministik: aynı sonuç
+    assert {(p["device"], p["partition"]) for p in c.get("/api/partitions", headers=H).json()} == parts_full
+    hist = c.get("/api/scan/history", headers=H).json()
+    only = c.get("/api/summary", params={"session_id": hist[0]["id"]}, headers=H).json()
+    assert only["partitions"] < full["partitions"]               # geçmiş görünümde tek tarama
+
+
+def test_protections_inventory(client):
+    c = client
+    H = c.H = _login(c)
+    c.post("/api/scan", json={}, headers=H)
+    c.wait_scan()
+    for kind in ("dos", "bot"):
+        used = c.get("/api/protections", params={"kind": kind}, headers=H).json()
+        unused = c.get("/api/protections", params={"kind": kind, "show": "unused"}, headers=H).json()
+        assert used["stats"]["used"] == len(used["rows"]) > 0
+        assert all(r[kind] for r in used["rows"])
+        assert all(not r[kind] and r["eligible"] for r in unused["rows"])
+        assert not any(r["virtual"].endswith("_80") for r in unused["rows"])   # redirect VS beklenmez
+        m = next(iter(used["stats"]["by_mode"]))
+        assert all(r[kind]["mode"] == m for r in c.get("/api/protections", params={"kind": kind, "mode": m},
+                                                        headers=H).json()["rows"])
+    assert c.get("/api/protections", params={"kind": "xyz"}, headers=H).status_code == 422
+    # çoklu önem filtresi
+    f = c.get("/api/findings", params={"severity": "CRITICAL,HIGH"}, headers=H).json()["findings"]
+    assert f and {x["severity"] for x in f} <= {"CRITICAL", "HIGH"}
+    # excel'de DoS/Bot sayfaları
+    import io
+
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(c.get("/api/report/xlsx", headers=H).content))
+    assert "DoS Protection" in wb.sheetnames and "Bot Protection" in wb.sheetnames
+
+
+def test_dos_profile_parsing():
+    from f5waf.protections import dos_info
+    d = dos_info("/P/dos", {"applicationReference": {"items": [
+        {"tpsBased": {"mode": "transparent"}, "stressBased": {"operationMode": "blocking"},
+         "botDefense": {"mode": "during-attacks"}}]}})
+    assert d["kind"] == "application" and d["mode"] == "blocking" and d["legacy_bot"] == "blocking"
+    assert dos_info("/P/net", {})["kind"] == "network"
+
+
+def test_policy_inventory(client):
+    c = client
+    H = c.H = _login(c)
+    c.post("/api/scan", json={}, headers=H)
+    c.wait_scan()
+    d = c.get("/api/policies", headers=H).json()
+    st = d["stats"]
+    assert st["total"] == len(d["rows"]) > 0
+    assert sum(st["by_mode"].values()) == st["total"]
+    assert st["attached"] + st["orphan"] == st["total"]
+    assert {x["device"] for x in st["by_device"]} == {"waf01", "waf02"}
+    r = d["rows"][0]
+    for k in ("device", "device_host", "partition", "customer", "full_path", "mode", "virtual_servers", "findings"):
+        assert k in r
+    # filtreler
+    tr = c.get("/api/policies", params={"mode": "transparent"}, headers=H).json()["rows"]
+    assert tr and all(x["mode"] == "transparent" for x in tr)
+    assert any(x["transparent_days"] for x in tr)          # WAF-001 bulgusundan gün sayısı
+    orphan = c.get("/api/policies", params={"vs": "orphan"}, headers=H).json()["rows"]
+    assert all(not x["virtual_servers"] for x in orphan)
+    w1 = c.get("/api/policies", params={"device": "waf01"}, headers=H).json()
+    assert all(x["device"] == "waf01" for x in w1["rows"]) and len(w1["stats"]["by_device"]) == 2
+    assert c.get("/api/policies", params={"search": "mock"}, headers=H).json()["rows"]   # host = config değeri
+    vs = next(x for x in d["rows"] if x["virtual_servers"])["virtual_servers"][0]["name"]
+    found = c.get("/api/policies", params={"search": vs.split("/")[-1]}, headers=H).json()["rows"]
+    assert any(v["name"] == vs for x in found for v in x["virtual_servers"])
+    import io
+
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(c.get("/api/report/xlsx", headers=H).content))
+    assert wb["ASM Policyler"].max_row == st["total"] + 1

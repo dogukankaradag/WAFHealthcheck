@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>WAF Healthcheck</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 112'%3E%3Cpath d='M48 4 88 17v35c0 27-17 46-40 56C25 98 8 79 8 52V17Z' fill='%23fff' stroke='%2318232B' stroke-width='6'/%3E%3Crect x='36' y='20' width='24' height='30' rx='12' fill='none' stroke='%2318232B' stroke-width='5'/%3E%3Crect x='36' y='64' width='24' height='30' rx='12' fill='none' stroke='%2318232B' stroke-width='5'/%3E%3Crect x='43' y='40' width='10' height='34' rx='5' fill='%23C9962B'/%3E%3C/svg%3E"/>
+<style>
+/* ───────────────────────── Tokens ───────────────────────── */
+:root{
+  --paper:#F3F5F4; --surface:#FFFFFF; --sunk:#EDF1F0; --hover:#F6F8F7;
+  --line:#DCE3E1; --line-strong:#C4CFCC;
+  --ink:#18232B; --ink-2:#4A5862; --ink-3:#7A8790;
+  --accent:#1F6F68; --accent-hover:#185A54; --accent-soft:#E2EFEC; --accent-line:#A9CBC5;
+  --gold:#C9962B; --gold-soft:#F7EDD6;
+  --crit:#B42318; --crit-soft:#FBEAE8;
+  --high:#C4570C; --high-soft:#FCEEE3;
+  --med:#9A6F00;  --med-soft:#F8F1DC;
+  --low:#3F6587;  --low-soft:#E8EFF5;
+  --info:#6E7B84; --info-soft:#EEF1F2;
+  --ok:#2E7D4F;   --ok-soft:#E4F2EA;
+  --display:"Bahnschrift","DIN Alternate","DIN Next","Barlow","Segoe UI",system-ui,sans-serif;
+  --text:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --mono:"Cascadia Mono","Cascadia Code",Consolas,"SFMono-Regular",Menlo,monospace;
+  --r-sm:6px; --r-md:10px; --r-lg:14px;
+  --shadow-pop:0 12px 32px rgba(24,35,43,.14),0 2px 6px rgba(24,35,43,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--paper);color:var(--ink);font:14px/1.5 var(--text);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--mono);font-size:12.5px}
+.muted{color:var(--ink-2)}
+.faint{color:var(--ink-3)}
+.num{font-family:var(--display);font-variant-numeric:tabular-nums}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}}
+
+/* ───────────────────────── Buttons & inputs ───────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:var(--surface);font-weight:600;font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--hover);border-color:var(--ink-3)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn.quiet{border-color:transparent;background:transparent;color:var(--ink-2)}
+.btn.quiet:hover{background:var(--sunk);color:var(--ink)}
+.btn.danger{color:var(--crit);border-color:#E7BDB8}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:default}
+.input,.select{height:34px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--surface);padding:0 10px;font-size:13px}
+.input:focus,.select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.select{padding-right:6px;max-width:260px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.field .input{height:40px;font-size:14px}
+
+/* ───────────────────────── Emblem ───────────────────────── */
+.emblem .shield{fill:var(--surface);stroke:var(--ink)}
+.emblem .link{fill:none;stroke:var(--ink)}
+.emblem .forged{fill:var(--gold)}
+.emblem .glint{stroke:#FFF6DD;stroke-linecap:round}
+
+/* ───────────────────────── Login ───────────────────────── */
+#login{position:fixed;inset:0;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(360px,.9fr);background:var(--surface);z-index:50}
+.login-art{background:var(--accent-soft);display:flex;flex-direction:column;justify-content:center;padding:56px clamp(32px,6vw,96px);gap:28px;border-right:1px solid var(--accent-line);position:relative;overflow:hidden}
+.login-art .emblem{width:132px;height:154px}
+.login-art h1{font-family:var(--display);font-weight:600;font-size:40px;line-height:1.05;letter-spacing:-.5px;max-width:12ch}
+.login-art p{font-size:16px;color:var(--ink-2);max-width:44ch;line-height:1.6}
+.login-art .rings{position:absolute;right:-60px;bottom:-40px;width:360px;opacity:.5;pointer-events:none}
+.login-form{display:flex;align-items:center;justify-content:center;padding:40px 24px}
+.login-form form{width:100%;max-width:340px;display:flex;flex-direction:column;gap:16px}
+.login-form h2{font-family:var(--display);font-weight:600;font-size:24px}
+.login-form .hint{font-size:13px;color:var(--ink-2);margin-top:-8px}
+.login-form .btn{height:42px;justify-content:center;font-size:14px}
+.form-error{background:var(--crit-soft);color:var(--crit);border-radius:var(--r-sm);padding:9px 12px;font-size:13px}
+@media(max-width:820px){#login{grid-template-columns:1fr;grid-template-rows:auto 1fr}.login-art{padding:28px 24px;gap:14px;border-right:0;border-bottom:1px solid var(--accent-line)}.login-art .emblem{width:64px;height:75px}.login-art h1{font-size:26px}.login-art p,.login-art .rings{display:none}}
+
+/* ───────────────────────── Splash (giriş sonrası) ───────────────────────── */
+#splash{position:fixed;inset:0;background:var(--paper);z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:30px;cursor:pointer;transition:opacity .5s ease;padding:24px}
+#splash.leaving{opacity:0}
+#splash .emblem{width:150px;height:175px}
+#splash .motto{font-family:var(--display);font-size:clamp(24px,3.6vw,40px);font-weight:600;letter-spacing:-.3px;text-align:center;max-width:22ch;line-height:1.2;opacity:0;transform:translateY(6px);animation:rise .7s .95s ease forwards}
+#splash .sub{font-size:13px;color:var(--ink-3);opacity:0;animation:rise .6s 1.4s ease forwards}
+#splash .link{stroke-dasharray:110;stroke-dashoffset:110;animation:draw .7s .1s ease forwards}
+#splash .link.l2{animation-delay:.25s}
+#splash .shield{stroke-dasharray:330;stroke-dashoffset:330;animation:draw .9s ease forwards}
+#splash .forged{transform-box:fill-box;transform-origin:center;opacity:0;animation:forge .5s .75s cubic-bezier(.3,1.6,.5,1) forwards}
+#splash .glint{opacity:0;animation:fade .3s 1.15s forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes forge{0%{opacity:0;transform:scale(.6)}100%{opacity:1;transform:scale(1)}}
+@keyframes rise{to{opacity:1;transform:none}}
+@keyframes fade{to{opacity:1}}
+
+/* ───────────────────────── App shell ───────────────────────── */
+#app{display:grid;grid-template-rows:60px 1fr;height:100vh}
+.top{display:flex;align-items:center;gap:18px;padding:0 18px;background:var(--surface);border-bottom:1px solid var(--line);min-width:0}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:600;font-size:17px;white-space:nowrap}
+.brand .emblem{width:24px;height:28px}
+.nav{display:flex;align-self:stretch;gap:2px;margin-left:8px;overflow-x:auto;min-width:0}
+.nav a{display:flex;align-items:center;gap:6px;padding:0 10px;color:var(--ink-2);text-decoration:none;font-weight:600;font-size:13.5px;border-bottom:2px solid transparent;white-space:nowrap}
+.nav a:hover{color:var(--ink)}
+.nav a.on{color:var(--accent);border-bottom-color:var(--accent)}
+.nav .count{font-family:var(--display);font-size:12px;color:var(--ink-3);font-weight:500}
+.nav a.on .count{color:var(--accent)}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.scanmeta{font-size:12px;line-height:1.45;color:var(--ink-2);padding:12px 16px;border-top:1px solid var(--line);background:var(--paper)}
+.scanmeta b{color:var(--ink);font-weight:600}
+.avatar{width:34px;height:34px;border-radius:50%;border:1px solid var(--line-strong);background:var(--accent-soft);color:var(--accent);font-weight:700;font-family:var(--display)}
+.menu{position:fixed;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow-pop);padding:6px;min-width:200px;z-index:40}
+.menu button{display:flex;width:100%;align-items:center;gap:8px;padding:8px 10px;border:0;background:none;border-radius:var(--r-sm);text-align:left;font-size:13.5px;color:var(--ink)}
+.menu button:hover{background:var(--sunk)}
+.menu .who{padding:8px 10px 10px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.menu .who small{display:block;color:var(--ink-3)}
+
+.body{display:grid;grid-template-columns:268px minmax(0,1fr);min-height:0}
+
+/* ───────────────────────── Scope sidebar ───────────────────────── */
+.scope{border-right:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;min-height:0}
+.scope-head{padding:16px 14px 10px}
+.scope-head h3{font-family:var(--display);font-weight:600;font-size:15px;margin-bottom:8px}
+.scope-head .input{width:100%}
+.scope-list{overflow-y:auto;padding:4px 8px 16px;flex:1}
+.sc{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;text-align:left;padding:6px 8px;border-radius:var(--r-sm);color:var(--ink)}
+button.sc:hover{background:var(--hover)}
+.sc.on{background:var(--accent-soft)}
+.sc.on .sc-name{color:var(--accent)}
+.sc-name{display:block;font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sc-sub{display:block;font-size:11.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sc .grow{flex:1;min-width:0}
+.sc.dev{margin-top:10px;padding:2px}
+.sc.dev .sc{padding:4px 6px}
+.sc.part{padding-left:28px}
+.sc.part .sc-name{font-weight:500;font-size:13px}
+.sc.clean .sc-name{color:var(--ink-2)}
+.sc .n{font-family:var(--display);font-size:12.5px;color:var(--ink-2);min-width:18px;text-align:right}
+.chev{width:20px;height:20px;border:0;background:none;color:var(--ink-3);display:flex;align-items:center;justify-content:center;transition:transform .15s;border-radius:4px;flex-shrink:0}
+.chev:hover{background:var(--sunk)}
+.chev.closed{transform:rotate(-90deg)}
+.health{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.health.ok{background:var(--ok)}.health.err{background:var(--crit)}
+.ring{width:16px;height:11px;border-radius:6px;border:2.5px solid var(--line-strong);flex-shrink:0}
+.ring.CRITICAL{border-color:var(--crit)}.ring.HIGH{border-color:var(--high)}.ring.MEDIUM{border-color:var(--med)}.ring.LOW{border-color:var(--low)}.ring.INFO{border-color:var(--info)}
+.ring.clean{border-color:var(--accent-line)}
+
+/* ───────────────────────── Main ───────────────────────── */
+main{overflow-y:auto;min-width:0}
+.page{padding:24px 28px 48px;max-width:1680px}
+@media(max-width:700px){.page{padding:16px}}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.page-head h1{font-family:var(--display);font-weight:600;font-size:26px;letter-spacing:-.3px;line-height:1.1}
+.page-head p{color:var(--ink-2);max-width:72ch;margin-top:6px}
+.crumb{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px 6px 3px 12px;font-size:13px;font-weight:600}
+.crumb button{border:0;background:var(--sunk);border-radius:50%;width:20px;height:20px;line-height:1;color:var(--ink-2)}
+.hist-note{display:flex;align-items:center;gap:10px;background:var(--gold-soft);border:1px solid #E6CF95;border-radius:var(--r-md);padding:8px 12px;margin-bottom:16px;font-size:13.5px;flex-wrap:wrap}
+.hist-note .btn{margin-left:auto}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg)}
+.panel + .panel{margin-top:16px}
+.panel-pad{padding:18px 20px}
+.panel h2{font-family:var(--display);font-weight:600;font-size:16px}
+
+/* ── Müşteri zinciri ── */
+.chain-wrap{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 24px;align-items:start}
+.chain-intro{font-size:13px;color:var(--ink-2);margin-top:2px}
+.weakest{text-align:right;font-size:13px;color:var(--ink-2);white-space:nowrap}
+.weakest b{display:block;font-family:var(--display);font-size:18px;color:var(--ink);font-weight:600}
+.weakest button{border:0;background:none;color:var(--accent);font-weight:600;padding:0;font-size:13px}
+.chain{grid-column:1/-1;display:flex;flex-wrap:wrap;row-gap:16px;padding:12px 0 2px 4px}
+.lk{position:relative;width:46px;height:26px;margin-left:-9px;border:0;background:none;padding:0}
+.lk:first-child{margin-left:0}
+.lk i{position:absolute;inset:0;border-radius:13px;border:4px solid var(--accent-line);transition:transform .12s}
+.lk:nth-child(even) i{inset:5px 3px;border-width:3.5px}
+.lk.CRITICAL i{border-color:var(--crit)}.lk.HIGH i{border-color:var(--high)}.lk.MEDIUM i{border-color:var(--med)}.lk.LOW i{border-color:var(--low)}.lk.INFO i{border-color:var(--info)}
+.lk:hover i,.lk.on i{transform:translateY(-3px)}
+.lk.on i{box-shadow:0 0 0 3px var(--accent-soft)}
+.lk.weak::after{content:"";position:absolute;left:50%;top:-10px;width:6px;height:6px;margin-left:-3px;border-radius:50%;background:var(--crit)}
+.lk:focus-visible{outline-offset:4px;border-radius:8px}
+.tip{position:fixed;z-index:70;background:var(--ink);color:#fff;border-radius:var(--r-sm);padding:8px 10px;font-size:12.5px;pointer-events:none;max-width:280px;line-height:1.45}
+
+/* ── Risk dağılımı ── */
+.spectrum{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--sunk);margin:14px 0 12px}
+.spectrum span{display:block;height:100%;transition:opacity .15s}
+.spectrum.filtering span:not(.sel){opacity:.22}
+.sevchips{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sevchip{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px 0 10px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--surface);font-weight:600;font-size:13px}
+.sevchip:hover{border-color:var(--line-strong)}
+.sevchip .num{font-size:15px}
+.sevchip[aria-pressed=true]{border-color:currentColor;box-shadow:inset 0 0 0 1px currentColor}
+.sevchip.CRITICAL{color:var(--crit)}.sevchip.HIGH{color:var(--high)}.sevchip.MEDIUM{color:var(--med)}.sevchip.LOW{color:var(--low)}.sevchip.INFO{color:var(--info)}
+.sevchip[aria-pressed=true].CRITICAL{background:var(--crit-soft)}.sevchip[aria-pressed=true].HIGH{background:var(--high-soft)}.sevchip[aria-pressed=true].MEDIUM{background:var(--med-soft)}.sevchip[aria-pressed=true].LOW{background:var(--low-soft)}.sevchip[aria-pressed=true].INFO{background:var(--info-soft)}
+.sevchip .lbl{color:var(--ink)}
+.glyph{width:12px;height:12px;flex-shrink:0;display:inline-block}
+.clearsel{border:0;background:none;color:var(--accent);font-weight:600;font-size:13px;padding:0 6px}
+
+/* ── Durum sekmeleri + araç çubuğu ── */
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:0 12px;overflow-x:auto}
+.tabs button{border:0;background:none;padding:12px 10px;font-weight:600;font-size:13.5px;color:var(--ink-2);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tabs button:hover{color:var(--ink)}
+.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--ink)}
+.tabs .num{font-size:12.5px;color:var(--ink-3);margin-left:5px;font-weight:500}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.toolbar .search{flex:1;min-width:200px}
+.toolbar .count{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
+.toggle{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--surface);font-size:13px;font-weight:600;color:var(--ink-2)}
+.toggle[aria-pressed=true]{background:var(--gold-soft);border-color:var(--gold);color:#7A5A12}
+
+/* ── Tablolar ── */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;font-size:12px;font-weight:600;color:var(--ink-3);padding:10px 14px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface)}
+.tbl td{padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tbl tbody tr.click{cursor:pointer}
+.tbl tbody tr.click:hover td{background:var(--hover)}
+.tbl tbody tr.sel td{background:var(--accent-soft)}
+.tbl td.r,.tbl th.r{text-align:right}
+.tbl .t1{font-weight:600}
+.tbl .t2{font-size:12.5px;color:var(--ink-2);margin-top:2px}
+.tbl .t3{font-size:12px;color:var(--ink-3);margin-top:2px}
+.obj{font-family:var(--mono);font-size:12.5px;word-break:break-all}
+.clip{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.table-scroll{overflow-x:auto}
+td.sevcell{border-left:3px solid transparent;white-space:nowrap}
+tr.CRITICAL td.sevcell{border-left-color:var(--crit)}tr.HIGH td.sevcell{border-left-color:var(--high)}tr.MEDIUM td.sevcell{border-left-color:var(--med)}tr.LOW td.sevcell{border-left-color:var(--low)}tr.INFO td.sevcell{border-left-color:var(--info)}
+.sev{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:13px}
+.sev.CRITICAL{color:var(--crit)}.sev.HIGH{color:var(--high)}.sev.MEDIUM{color:var(--med)}.sev.LOW{color:var(--low)}.sev.INFO{color:var(--info)}
+.ck{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;letter-spacing:.2px}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+.st::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--line-strong)}
+.st.acknowledged::before{background:var(--low)}.st.in_progress::before{background:var(--med)}.st.resolved::before,.st.fixed::before{background:var(--ok)}.st.failed::before{background:var(--crit)}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;margin-top:4px;margin-right:4px}
+.tag.new{background:var(--accent-soft);color:var(--accent)}
+.tag.supp{background:var(--sunk);color:var(--ink-2)}
+.tag.chg{background:var(--gold-soft);color:#7A5A12}
+.empty{padding:56px 24px;text-align:center;color:var(--ink-2)}
+.empty h3{font-family:var(--display);font-weight:600;font-size:18px;color:var(--ink);margin-bottom:6px}
+.more{padding:12px;text-align:center;font-size:12.5px;color:var(--ink-3);border-top:1px solid var(--line)}
+.bar{display:flex;height:8px;border-radius:4px;background:var(--sunk);overflow:hidden;min-width:140px}
+.bar span{height:100%}
+
+/* ── Koruma sayfaları ── */
+.cover{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 32px;align-items:center}
+@media(max-width:700px){.cover{grid-template-columns:1fr}}
+.cover .big{font-family:var(--display);font-size:40px;font-weight:600;line-height:1;letter-spacing:-.5px}
+.cover .big small{font-size:18px;color:var(--ink-3);font-weight:500}
+.cover .cap{font-size:13px;color:var(--ink-2)}
+.meter{height:12px;border-radius:6px;background:var(--crit-soft);overflow:hidden}
+.meter span{display:block;height:100%;background:var(--accent);border-radius:6px}
+.modes{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r-sm);overflow:hidden;flex-shrink:0}
+.seg button{border:0;background:var(--surface);padding:0 14px;height:32px;font-weight:600;font-size:13px;color:var(--ink-2);border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--ink);color:#fff}
+.mode{display:inline-flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;padding:2px 8px;border-radius:4px;white-space:nowrap}
+.mode.blocking{background:var(--ok-soft);color:var(--ok)}
+.mode.transparent{background:var(--med-soft);color:var(--med)}
+.mode.learning{background:var(--low-soft);color:var(--low)}
+.mode.off,.mode.none{background:var(--crit-soft);color:var(--crit)}
+.mode.network,.mode.unknown{background:var(--sunk);color:var(--ink-2)}
+.modechip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface);height:34px;padding:0 10px 0 6px;font-size:13px}
+.modechip[aria-pressed=true]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.modechip .num{font-size:14px;font-weight:600}
+
+/* ── ASM Policyler ── */
+.polsum{display:grid;grid-template-columns:auto minmax(0,1fr);gap:18px 40px;align-items:start}
+@media(max-width:820px){.polsum{grid-template-columns:1fr}}
+.polsum .big{font-family:var(--display);font-size:44px;font-weight:600;line-height:1;letter-spacing:-.5px}
+.polsum .cap{font-size:13px;color:var(--ink-2);margin-top:6px;max-width:30ch}
+.split{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--sunk)}
+.split span{height:100%;transition:opacity .15s}
+.split.filtering span:not(.sel){opacity:.25}
+.legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.devchips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.devchip{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface);padding:7px 12px;min-width:150px;text-align:left}
+.devchip:hover{border-color:var(--line-strong)}
+.devchip[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--accent-soft)}
+.devchip b{font-size:13.5px;display:flex;align-items:center;gap:7px;width:100%}
+.devchip b .num{margin-left:auto;font-size:15px}
+.devchip .mono{font-size:12px;color:var(--ink-3)}
+.devchip .mix{font-size:11.5px;color:var(--ink-2)}
+.vslist{display:flex;flex-direction:column;gap:6px}
+.vslist .obj{font-size:12px}
+.vslist .t3{margin-top:0}
+.morebtn{border:0;background:none;color:var(--accent);font-weight:600;font-size:12.5px;padding:0;text-align:left}
+.fcount{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:var(--r-sm);padding:3px 8px;font-weight:600;font-size:13px}
+.fcount:hover{border-color:var(--line-strong);background:var(--hover)}
+.days{font-size:12px;color:var(--med);font-weight:600;margin-top:4px}
+
+/* ── Cihazlar ── */
+.devgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.devgrid .panel + .panel{margin-top:0}
+.dev h2{display:flex;align-items:center;gap:8px}
+.dev .host{font-family:var(--mono);font-size:12px;color:var(--ink-3);margin-top:2px}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 10px;margin-top:16px}
+.facts div b{display:block;font-family:var(--display);font-size:22px;font-weight:600;line-height:1.1}
+.facts div span{font-size:12px;color:var(--ink-2)}
+.dev .err{margin-top:14px;background:var(--crit-soft);color:var(--crit);border-radius:var(--r-sm);padding:9px 12px;font-size:13px;word-break:break-word}
+
+/* ── Sağ panel (bulgu detayı) ── */
+.scrim{position:fixed;inset:0;background:rgba(24,35,43,.22);z-index:30;opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);background:var(--surface);z-index:31;box-shadow:-12px 0 32px rgba(24,35,43,.12);transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column;visibility:hidden}
+.drawer.on{transform:none;visibility:visible}
+.drawer-head{padding:20px 24px 16px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center}
+.drawer-head h2{font-family:var(--display);font-weight:600;font-size:20px;line-height:1.25;grid-column:1/-1}
+.drawer-body{padding:20px 24px 32px;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
+.blk h4{font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.blk p{line-height:1.6}
+.fix{background:var(--accent-soft);border-left:3px solid var(--accent);padding:12px 14px;border-radius:0 var(--r-sm) var(--r-sm) 0;line-height:1.6}
+.kv{display:grid;grid-template-columns:minmax(110px,auto) 1fr;gap:6px 16px;font-size:13px}
+.kv dt{color:var(--ink-2)}
+.kv dd{word-break:break-word}
+.wf{background:var(--paper);border:1px solid var(--line);border-radius:var(--r-md);padding:14px;display:flex;flex-direction:column;gap:10px}
+.wf h4{font-size:13px;font-weight:600}
+.wf .seg{align-self:flex-start;max-width:100%;overflow-x:auto}
+.wf .seg button[aria-pressed=true].resolved{background:var(--ok)}
+.wf .input{width:100%}
+.changed{background:var(--gold-soft);border:1px solid #E6CF95;border-radius:var(--r-sm);padding:10px 12px;font-size:13px;color:#6B4F10}
+
+/* ── Diyaloglar ── */
+.overlay{position:fixed;inset:0;background:rgba(24,35,43,.3);z-index:45;display:none;align-items:center;justify-content:center;padding:16px}
+.overlay.on{display:flex}
+.dialog{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);width:520px;max-width:100%;max-height:88vh;overflow-y:auto}
+.dialog.wide{width:1000px}
+.dialog-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line)}
+.dialog-head h2{font-family:var(--display);font-weight:600;font-size:18px}
+.dialog-body{padding:18px 22px}
+.dialog-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 22px;border-top:1px solid var(--line)}
+.x{border:0;background:none;width:32px;height:32px;border-radius:var(--r-sm);font-size:16px;color:var(--ink-2)}
+.x:hover{background:var(--sunk)}
+.devpick{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.devpick label{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;cursor:pointer}
+.devpick label:hover{background:var(--hover)}
+.devpick input{width:16px;height:16px;accent-color:var(--accent)}
+.devpick .mono{color:var(--ink-3)}
+.msg{border-radius:var(--r-sm);padding:9px 12px;font-size:13px;margin-bottom:12px}
+.msg.err{background:var(--crit-soft);color:var(--crit)}.msg.ok{background:var(--ok-soft);color:var(--ok)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:560px){.grid2{grid-template-columns:1fr}}
+
+/* ── Tarama ilerleme kartı ── */
+#progress{position:fixed;right:20px;bottom:20px;width:380px;max-width:calc(100vw - 32px);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);z-index:35;padding:16px 18px;display:none}
+#progress.on{display:block}
+#progress .ph{display:flex;align-items:center;gap:10px}
+#progress .ph b{font-family:var(--display);font-size:15px;font-weight:600;flex:1}
+#progress .timer{font-family:var(--display);color:var(--ink-2)}
+#progress .ps{font-size:12.5px;color:var(--ink-2);margin:2px 0 10px 30px}
+.pdev{display:grid;grid-template-columns:70px 1fr;gap:2px 10px;font-size:12.5px;padding:6px 0;border-top:1px solid var(--line)}
+.pdev b{font-weight:600}
+.pdev .s-done{color:var(--ok)}.pdev .s-error{color:var(--crit)}.pdev .s-running{color:var(--accent)}.pdev .s-queued{color:var(--ink-3)}
+.spinner{width:20px;height:20px;border-radius:50%;border:2.5px solid var(--accent-soft);border-top-color:var(--accent);animation:spin .8s linear infinite;flex-shrink:0}
+.donemark{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:var(--r-sm);padding:10px 16px;font-size:13.5px;z-index:80;display:none;max-width:90vw}
+#toast.on{display:block}#toast.err{background:var(--crit)}
+
+/* ── Duyarlı düzen (en sonda: üstteki kuralları ezer) ── */
+@media(max-width:1500px){.brand span{display:none}.top{gap:10px}}
+@media(max-width:980px){
+  #app{grid-template-rows:auto 1fr}
+  .top{flex-wrap:wrap;padding:8px 12px 0;gap:8px}
+  .top-right{margin-left:auto}
+  .nav{order:3;width:100%;margin:0 -12px;padding:0 4px;height:44px;border-top:1px solid var(--line)}
+  .body{grid-template-columns:1fr}
+  .scope{display:none}
+  .chain-wrap{grid-template-columns:1fr}
+  .weakest{text-align:left}
+}
+@media(max-width:520px){
+  #histBtn{display:none}
+  #scanBtn{padding:0 10px}
+  .page-head h1{font-size:22px}
+  .toolbar .search{min-width:100%}
+}
+</style>
+</head>
+<body>
+
+<!-- Amblem: zincir halkalarından kalkan; ortadaki halka dövülmüş, yani güçlendirilmiş zayıf halka -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="emblem" viewBox="0 0 96 112">
+      <path fill="#FFFFFF" stroke="#18232B" stroke-width="5" stroke-linejoin="round" d="M48 4 88 17v35c0 27-17 46-40 56C25 98 8 79 8 52V17Z"/>
+      <rect fill="none" stroke="#18232B" x="36" y="20" width="24" height="30" rx="12" stroke-width="4.5"/>
+      <rect fill="none" stroke="#18232B" x="36" y="64" width="24" height="30" rx="12" stroke-width="4.5"/>
+      <rect fill="#C9962B" x="43" y="40" width="10" height="34" rx="5"/>
+      <path fill="none" stroke="#18232B" stroke-width="4.5" d="M36.6 41a11.6 11.6 0 0 0 22.8 0"/>
+      <path stroke="#FFF6DD" stroke-linecap="round" stroke-width="2" d="M46.5 46v8"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ── Giriş ── -->
+<div id="login" hidden>
+  <section class="login-art">
+    <svg class="emblem" role="img" aria-label="WAF Healthcheck amblemi"><use href="#emblem"/></svg>
+    <h1>WAF Healthcheck</h1>
+    <p>F5 BIG-IP üzerindeki her müşteri partition'ının WAF, DoS ve Bot korumasını tek yerden denetleyin. Zayıf halkayı saldırgandan önce siz bulun.</p>
+    <svg class="rings" viewBox="0 0 360 200" fill="none" stroke="#A9CBC5" stroke-width="10" aria-hidden="true">
+      <rect x="20" y="60" width="120" height="70" rx="35"/><rect x="110" y="75" width="110" height="40" rx="20" stroke-width="8"/>
+      <rect x="190" y="60" width="120" height="70" rx="35"/>
+    </svg>
+  </section>
+  <section class="login-form">
+    <form id="loginForm" autocomplete="on">
+      <h2>Oturum açın</h2>
+      <p class="hint">Hesabınızı sistem yöneticisi oluşturur.</p>
+      <div class="form-error" id="loginErr" hidden></div>
+      <div class="field"><label for="inputUser">Kullanıcı adı</label><input class="input" id="inputUser" autocomplete="username" required></div>
+      <div class="field"><label for="inputPass">Parola</label><input class="input" id="inputPass" type="password" autocomplete="current-password" required></div>
+      <button class="btn primary" id="loginBtn" type="submit">Oturum aç</button>
+    </form>
+  </section>
+</div>
+
+<!-- ── Giriş sonrası geçiş ── -->
+<div id="splash" hidden title="Geçmek için tıklayın">
+  <svg class="emblem" viewBox="0 0 96 112" aria-hidden="true">
+    <path class="shield" stroke-width="5" stroke-linejoin="round" d="M48 4 88 17v35c0 27-17 46-40 56C25 98 8 79 8 52V17Z"/>
+    <rect class="link" x="36" y="20" width="24" height="30" rx="12" stroke-width="4.5"/>
+    <rect class="link l2" x="36" y="64" width="24" height="30" rx="12" stroke-width="4.5"/>
+    <rect class="forged" x="43" y="40" width="10" height="34" rx="5"/>
+    <path class="link l2" stroke-width="4.5" d="M36.6 41a11.6 11.6 0 0 0 22.8 0"/>
+    <path class="glint" stroke-width="2" d="M46.5 46v8"/>
+  </svg>
+  <div class="motto">En zayıf halkanız kadar güçlüsünüz.</div>
+  <div class="sub">Zincir kontrol ediliyor</div>
+</div>
+
+<!-- ── Uygulama ── -->
+<div id="app" hidden>
+  <header class="top">
+    <div class="brand"><svg class="emblem" aria-hidden="true"><use href="#emblem"/></svg><span>WAF Healthcheck</span></div>
+    <nav class="nav" id="nav" aria-label="Ana menü">
+      <a href="#bulgular" data-view="findings">Bulgular <span class="count" id="navFindings"></span></a>
+      <a href="#policyler" data-view="policies">ASM Policyler <span class="count" id="navPolicies"></span></a>
+      <a href="#musteriler" data-view="customers">Müşteriler <span class="count" id="navCustomers"></span></a>
+      <a href="#dos" data-view="dos">DoS Protection <span class="count" id="navDos"></span></a>
+      <a href="#bot" data-view="bot">Bot Protection <span class="count" id="navBot"></span></a>
+      <a href="#cihazlar" data-view="devices">Cihazlar</a>
+    </nav>
+    <div class="top-right">
+      <button class="btn quiet" id="histBtn">Geçmiş</button>
+      <button class="btn" id="reportBtn" aria-haspopup="menu">Rapor</button>
+      <button class="btn primary" id="scanBtn" hidden>Taramayı başlat</button>
+      <button class="avatar" id="avatarBtn" aria-haspopup="menu" aria-label="Hesap menüsü">?</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <aside class="scope" aria-label="Kapsam">
+      <div class="scope-head">
+        <h3>Kapsam</h3>
+        <input class="input" id="scopeSearch" placeholder="Müşteri veya partition ara" aria-label="Müşteri veya partition ara">
+      </div>
+      <div class="scope-list" id="scopeList"></div>
+      <div class="scanmeta" id="scanMeta"></div>
+    </aside>
+    <main id="main"><div class="page" id="page"></div></main>
+  </div>
+</div>
+
+<div class="menu" id="reportMenu" role="menu" hidden>
+  <button data-fmt="xlsx">Excel (.xlsx)</button>
+  <button data-fmt="html">HTML rapor</button>
+  <button data-fmt="csv">CSV</button>
+  <button data-fmt="json">JSON</button>
+</div>
+<div class="menu" id="userMenu" role="menu" hidden>
+  <div class="who"><b id="whoName"></b><small id="whoRole"></small></div>
+  <button id="usersBtn" hidden>Kullanıcıları yönet</button>
+  <button id="logoutBtn">Oturumu kapat</button>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Bulgu detayı" aria-hidden="true">
+  <div class="drawer-head"><div id="drawerSev"></div><button class="x" id="drawerClose" aria-label="Kapat">✕</button><h2 id="drawerTitle"></h2></div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<div class="overlay" id="scanDlg"><div class="dialog" role="dialog" aria-labelledby="scanDlgT">
+  <div class="dialog-head"><h2 id="scanDlgT">Taramayı başlat</h2><button class="x" data-close="scanDlg" aria-label="Kapat">✕</button></div>
+  <div class="dialog-body">
+    <p class="muted" style="margin-bottom:12px">Taranacak cihazları seçin. Tarama cihazlarda yalnızca okuma yapar.</p>
+    <div class="devpick" id="devPick"></div>
+    <div class="field"><label for="scanParts">Yalnızca bu partition'lar (isteğe bağlı)</label>
+      <input class="input" id="scanParts" placeholder="P_ACME, P_BETA*"></div>
+    <p class="faint" style="font-size:12.5px;margin-top:6px">Boş bırakırsanız tüm partition'lar taranır. Virgülle ayırın; * joker karakterdir.</p>
+  </div>
+  <div class="dialog-foot"><label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="pickAll" checked style="accent-color:var(--accent)"> Tümünü seç</label>
+    <button class="btn primary" id="scanGo">Taramayı başlat</button></div>
+</div></div>
+
+<div class="overlay" id="histDlg"><div class="dialog wide" role="dialog" aria-labelledby="histDlgT">
+  <div class="dialog-head"><h2 id="histDlgT">Tarama geçmişi</h2><button class="x" data-close="histDlg" aria-label="Kapat">✕</button></div>
+  <div class="table-scroll" id="histBody"></div>
+</div></div>
+
+<div class="overlay" id="usersDlg"><div class="dialog wide" role="dialog" aria-labelledby="usersDlgT">
+  <div class="dialog-head"><h2 id="usersDlgT">Kullanıcılar</h2><button class="x" data-close="usersDlg" aria-label="Kapat">✕</button></div>
+  <div id="usersBody"></div>
+</div></div>
+
+<div class="overlay" id="editDlg"><div class="dialog" role="dialog" aria-labelledby="editDlgT">
+  <div class="dialog-head"><h2 id="editDlgT">Kullanıcıyı düzenle</h2><button class="x" data-close="editDlg" aria-label="Kapat">✕</button></div>
+  <div class="dialog-body">
+    <input type="hidden" id="editId">
+    <div class="grid2">
+      <div class="field" style="grid-column:1/-1"><label for="editUsername">Kullanıcı adı</label><input class="input" id="editUsername" readonly></div>
+      <div class="field"><label for="editFullname">Ad soyad</label><input class="input" id="editFullname"></div>
+      <div class="field"><label for="editRole">Rol</label><select class="select" id="editRole" style="height:40px;max-width:none"><option value="readonly">Görüntüleyici</option><option value="admin">Yönetici</option></select></div>
+      <div class="field" style="grid-column:1/-1"><label for="editPassword">Yeni parola (değiştirmeyecekseniz boş bırakın)</label><input class="input" id="editPassword" type="password" autocomplete="new-password"></div>
+    </div>
+  </div>
+  <div class="dialog-foot"><span></span><div style="display:flex;gap:8px"><button class="btn" data-close="editDlg">Vazgeç</button><button class="btn primary" id="editSave">Değişiklikleri kaydet</button></div></div>
+</div></div>
+
+<div id="progress" aria-live="polite">
+  <div class="ph"><span id="pIcon" class="spinner"></span><b id="pTitle">Tarama sürüyor</b><span class="timer" id="pTimer">00:00</span></div>
+  <div class="ps" id="pSub"></div>
+  <div id="pList"></div>
+</div>
+<div id="toast" role="status"></div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+/* ───────────────────────── Sabitler ───────────────────────── */
+const SEVS = ['CRITICAL','HIGH','MEDIUM','LOW','INFO'];
+const SEV_TR = {CRITICAL:'Kritik',HIGH:'Yüksek',MEDIUM:'Orta',LOW:'Düşük',INFO:'Bilgi'};
+const SEV_VAR = {CRITICAL:'--crit',HIGH:'--high',MEDIUM:'--med',LOW:'--low',INFO:'--info'};
+const W = {CRITICAL:40,HIGH:15,MEDIUM:5,LOW:1,INFO:0};
+const WF_TR = {open:'Açık',acknowledged:'Onaylandı',in_progress:'İşlemde',resolved:'Çözüldü',fixed:'Düzeltildi'};
+const MODE_TR = {blocking:'Blocking',transparent:'Transparent',learning:'Learning',off:'Kapalı',network:'Yalnızca network',unknown:'Bilinmiyor'};
+const SCAN_TR = {completed:'Tamamlandı',partial:'Kısmen tamamlandı',running:'Sürüyor',failed:'Başarısız'};
+const VIEWS = {bulgular:'findings',policyler:'policies',musteriler:'customers',dos:'dos',bot:'bot',cihazlar:'devices'};
+
+function glyph(s){
+  const c = `var(${SEV_VAR[s]||'--info'})`;
+  const shape = {
+    CRITICAL:`<path d="M6 .8 11.2 6 6 11.2.8 6Z" fill="${c}"/>`,
+    HIGH:`<path d="M6 1 11.4 10.6H.6Z" fill="${c}"/>`,
+    MEDIUM:`<circle cx="6" cy="6" r="4.8" fill="${c}"/>`,
+    LOW:`<rect x="1.6" y="1.6" width="8.8" height="8.8" rx="1.5" fill="${c}"/>`,
+    INFO:`<circle cx="6" cy="6" r="4" fill="none" stroke="${c}" stroke-width="2"/>`}[s] || '';
+  return `<svg class="glyph" viewBox="0 0 12 12" aria-hidden="true">${shape}</svg>`;
+}
+
+/* ───────────────────────── Durum ───────────────────────── */
+const S = {
+  token: localStorage.getItem('waf_token') || '',
+  user: JSON.parse(localStorage.getItem('waf_user') || 'null'),
+  view: 'findings', scope: {device:null, partition:null}, openDevs: new Set(),
+  sev: new Set(), status: 'all', changedOnly: false, cat: 'all', check: 'all', q: '',
+  hist: null, histLabel: '', summary: null, devices: [], checks: [], findings: [], selFp: null, protStats: {},
+  prot: {dos:{show:'used',mode:'all',q:''}, bot:{show:'used',mode:'all',q:''}},
+  pol: {mode:'all', vs:'all', status:'all', q:'', open:new Set()},
+  custQ: '', poll: null, tick: null,
+};
+const isAdmin = () => S.user?.role === 'admin';
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtDate = t => t ? new Date(t).toLocaleString('tr-TR',{timeZone:'Europe/Istanbul',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+const partLabel = p => p === '(cihaz)' ? 'Cihaz geneli' : p;
+function toast(m, err){const t=$('toast');t.textContent=m;t.className='on'+(err?' err':'');clearTimeout(t._h);t._h=setTimeout(()=>t.className='',3800);}
+function qs(o){const p=new URLSearchParams();for(const[k,v]of Object.entries(o))if(v!==null&&v!==undefined&&v!==''&&v!=='all')p.set(k,v);return p.toString();}
+const sess = () => S.hist ? {session_id:S.hist} : {};
+
+/* ───────────────────────── API ───────────────────────── */
+async function api(path, opts={}) {
+  try {
+    const headers = {'Content-Type':'application/json'};
+    if (S.token) headers.Authorization = `Bearer ${S.token}`;
+    const res = await fetch(path, {...opts, headers:{...headers, ...(opts.headers||{})}});
+    if (res.status === 401) { logout(); return null; }
+    if (!res.ok) { let d=''; try{d=(await res.json()).detail}catch{}; if(!opts.quiet) toast(typeof d==='string'&&d?d:`İstek tamamlanamadı (${res.status}).`, true); return null; }
+    return res.status === 204 ? {} : res.json();
+  } catch { if(!opts.quiet) toast('Sunucuya ulaşılamıyor. Bağlantıyı kontrol edin.', true); return null; }
+}
+
+/* ───────────────────────── Giriş / çıkış ───────────────────────── */
+$('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const u=$('inputUser').value.trim(), p=$('inputPass').value, btn=$('loginBtn'), err=$('loginErr');
+  btn.disabled=true; btn.textContent='Oturum açılıyor'; err.hidden=true;
+  try {
+    const res = await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({username:u,password:p})});
+    const d = await res.json().catch(()=>({}));
+    if (!res.ok) { err.textContent = d.detail || 'Oturum açılamadı.'; err.hidden=false; return; }
+    S.token=d.access_token; S.user={username:d.username,full_name:d.full_name,role:d.role};
+    localStorage.setItem('waf_token',S.token); localStorage.setItem('waf_user',JSON.stringify(S.user));
+    $('inputPass').value='';
+    playSplash(enterApp);
+  } catch { err.textContent='Sunucuya ulaşılamıyor.'; err.hidden=false; }
+  finally { btn.disabled=false; btn.textContent='Oturum aç'; }
+});
+
+function playSplash(done) {
+  const old=$('splash'); $('login').hidden=true;
+  const sp = old.cloneNode(true); old.replaceWith(sp);   // animasyonu her girişte baştan oynat
+  sp.hidden=false;
+  let finished=false;
+  const finish=()=>{ if(finished) return; finished=true; done(); sp.classList.add('leaving'); setTimeout(()=>{sp.hidden=true; sp.classList.remove('leaving');},500); };
+  sp.addEventListener('click', finish);
+  setTimeout(finish, matchMedia('(prefers-reduced-motion: reduce)').matches ? 1200 : 2700);
+}
+
+function logout() {
+  S.token=''; S.user=null; clearInterval(S.poll); clearInterval(S.tick);
+  localStorage.removeItem('waf_token'); localStorage.removeItem('waf_user');
+  $('app').hidden=true; $('progress').classList.remove('on'); closeDrawer(); hideMenus();
+  document.querySelectorAll('.overlay.on').forEach(o=>o.classList.remove('on'));
+  $('login').hidden=false; setTimeout(()=>$('inputUser').focus(),50);
+}
+
+function enterApp() {
+  $('app').hidden=false;
+  const name = S.user?.full_name || S.user?.username || '?';
+  $('avatarBtn').textContent = name.trim()[0].toUpperCase();
+  $('whoName').textContent = name; $('whoRole').textContent = isAdmin() ? 'Yönetici' : 'Görüntüleyici';
+  $('scanBtn').hidden = !isAdmin(); $('usersBtn').hidden = !isAdmin();
+  routeFromHash(); loadAll(); checkRunning();
+}
+
+/* ───────────────────────── Yönlendirme ───────────────────────── */
+function routeFromHash(){ S.view = VIEWS[location.hash.slice(1)] || 'findings'; document.querySelectorAll('#nav a').forEach(a=>a.classList.toggle('on', a.dataset.view===S.view)); }
+window.addEventListener('hashchange', ()=>{ routeFromHash(); closeDrawer(); render(); $('main').scrollTop=0; });
+
+/* ───────────────────────── Veri yükleme ───────────────────────── */
+async function loadAll() {
+  const [sum, devs, chk, dos, bot, pol] = await Promise.all([
+    api('/api/summary?'+qs(sess())), api('/api/devices?'+qs(sess())), api('/api/findings/check-names?'+qs(sess())),
+    api('/api/protections?'+qs({kind:'dos',...sess()}),{quiet:true}), api('/api/protections?'+qs({kind:'bot',...sess()}),{quiet:true}),
+    api('/api/policies?'+qs(sess()),{quiet:true})]);
+  if (!S.token) return;
+  S.summary = sum; S.devices = Array.isArray(devs)?devs:[]; S.checks = Array.isArray(chk)?chk:[];
+  S.protStats = {dos:dos?.stats, bot:bot?.stats}; S.polTotal = pol?.stats?.total;
+  if (!S.openDevs.size) S.devices.forEach(d=>S.openDevs.add(d.id));
+  renderTop(); renderScope(); render();
+}
+function render() {
+  ({findings:viewFindings, policies:viewPolicies, customers:viewCustomers, dos:()=>viewProtection('dos'), bot:()=>viewProtection('bot'), devices:viewDevices}[S.view])();
+}
+function renderTop() {
+  const s = S.summary || {};
+  $('navFindings').textContent = s.session_id ? s.total_findings : '';
+  $('navCustomers').textContent = s.session_id ? s.partitions : '';
+  $('navPolicies').textContent = S.polTotal ?? '';
+  const ps = S.protStats || {};
+  $('navDos').textContent = ps.dos?.eligible ? `${ps.dos.covered}/${ps.dos.eligible}` : '';
+  $('navBot').textContent = ps.bot?.eligible ? `${ps.bot.covered}/${ps.bot.eligible}` : '';
+  const m = $('scanMeta');
+  if (S.hist) m.innerHTML = `Geçmiş tarama<br><b>${esc(S.histLabel)}</b>`;
+  else if (s.last_scan) m.innerHTML = `Son tarama <b>${fmtDate(s.last_scan)}</b><br>${s.devices_ok}/${s.devices_total} cihaz, ${s.partitions} partition${s.merged_from>1?`<br>${s.merged_from} taramanın birleşik görünümü`:''}`;
+  else m.textContent = 'Henüz tarama yok';
+  m.title = 'Güncel görünüm: her partition için onu kapsayan en son tarama gösterilir.';
+}
+
+/* ───────────────────────── Kapsam (sol menü) ───────────────────────── */
+function worst(f){ return SEVS.find(s => (f?.[s]||0) > 0) || null; }
+function renderScope() {
+  const q = $('scopeSearch').value.trim().toLowerCase();
+  let h = `<button class="sc ${!S.scope.device?'on':''}" data-d="" data-p=""><span class="grow"><span class="sc-name">Tüm cihazlar</span></span><span class="n">${S.summary?.session_id ? S.summary.total_findings : ''}</span></button>`;
+  for (const d of S.devices) {
+    const parts = d.partitions.filter(p => !q || (p.name+' '+(p.customer||'')).toLowerCase().includes(q));
+    if (q && !parts.length) continue;
+    const open = S.openDevs.has(d.id) || !!q;
+    h += `<div class="sc dev ${S.scope.device===d.id&&!S.scope.partition?'on':''}">
+      <button class="chev ${open?'':'closed'}" data-tog="${esc(d.id)}" aria-label="${esc(d.id)} ${open?'daralt':'genişlet'}" aria-expanded="${open}">▾</button>
+      <button class="sc" data-d="${esc(d.id)}" data-p="" title="${esc(d.error||'')}">
+        <span class="health ${d.ok?'ok':'err'}" title="${d.ok?'Tarandı':'Taranamadı'}"></span>
+        <span class="grow"><span class="sc-name">${esc(d.id)}</span><span class="sc-sub">${esc(d.host)}${d.version?', v'+esc(d.version):''}</span></span>
+        <span class="n">${d.total||''}</span></button></div>`;
+    if (!open) continue;
+    for (const p of parts) {
+      const w = worst(p.findings), on = S.scope.device===d.id && S.scope.partition===p.name;
+      const cust = p.customer && p.customer!==p.name && p.name!=='(cihaz)' ? `<span class="sc-sub">${esc(p.customer)}</span>` : '';
+      h += `<button class="sc part ${on?'on':''} ${p.total?'':'clean'}" data-d="${esc(d.id)}" data-p="${esc(p.name)}">
+        <span class="ring ${w||'clean'}" title="${w?'En ağır açık bulgu: '+SEV_TR[w]:'Açık bulgu yok'}"></span>
+        <span class="grow"><span class="sc-name">${esc(partLabel(p.name))}</span>${cust}</span>
+        <span class="n">${p.total||''}</span></button>`;
+    }
+  }
+  if (!S.devices.length) h += `<p class="faint" style="padding:16px 8px;font-size:13px">Tarama yapıldığında cihazlar ve partition'lar burada listelenir.</p>`;
+  $('scopeList').innerHTML = h;
+}
+$('scopeSearch').addEventListener('input', renderScope);
+$('scopeList').addEventListener('click', e => {
+  const t = e.target.closest('[data-tog]');
+  if (t) { const id=t.dataset.tog; S.openDevs.has(id)?S.openDevs.delete(id):S.openDevs.add(id); renderScope(); return; }
+  const b = e.target.closest('[data-d]'); if (!b) return;
+  setScope(b.dataset.d||null, b.dataset.p||null);
+});
+function setScope(device, partition) {
+  S.scope = {device, partition}; renderScope(); closeDrawer(); delete $('page').dataset.kind;
+  if (S.view==='customers' || S.view==='devices') location.hash='bulgular'; else render();
+}
+function scopeCrumb() {
+  if (!S.scope.device) return '';
+  const label = S.scope.partition ? `${S.scope.device} / ${partLabel(S.scope.partition)}` : S.scope.device;
+  return `<span class="crumb">${esc(label)} <button onclick="setScope(null,null)" aria-label="Kapsamı kaldır">✕</button></span>`;
+}
+function histNote() {
+  return S.hist ? `<div class="hist-note"><span>${esc(S.histLabel)} tarihli tarama görüntüleniyor. Takip durumları yalnızca güncel görünümde değiştirilebilir.</span><button class="btn sm" onclick="exitHist()">Güncel görünüme dön</button></div>` : '';
+}
+
+/* ───────────────────────── Bulgular ───────────────────────── */
+function partitionsFlat() {
+  const out=[];
+  for (const d of S.devices) for (const p of d.partitions) if (p.name!=='(cihaz)') out.push({device:d.id, ...p});
+  return out;
+}
+function viewFindings() {
+  const s = S.summary;
+  if (!s || !s.session_id) {
+    $('page').innerHTML = `${histNote()}<div class="page-head"><div><h1>Bulgular</h1></div></div>
+      <div class="panel"><div class="empty"><h3>Henüz tamamlanmış tarama yok</h3>
+      <p>${isAdmin()?'İlk taramayı başlattığınızda müşteri zinciri ve bulgular burada görünür.':'Bir yöneticinin tarama başlatması gerekiyor.'}</p>
+      ${isAdmin()?'<p style="margin-top:16px"><button class="btn primary" onclick="openScan()">Taramayı başlat</button></p>':''}</div></div>`;
+    return;
+  }
+  const parts = partitionsFlat();
+  const weak = parts.filter(p=>p.score>0).sort((a,b)=>b.score-a.score)[0];
+  const chain = parts.map((p,i) => {
+    const w = worst(p.findings), on = S.scope.device===p.device && S.scope.partition===p.name;
+    return `<button class="lk ${w||''} ${on?'on':''} ${weak&&p===weak?'weak':''}" data-i="${i}" aria-label="${esc(p.customer||p.name)}: ${p.total} açık bulgu"><i></i></button>`;
+  }).join('');
+  const bys = s.by_severity || {}, tot = SEVS.reduce((a,k)=>a+(bys[k]||0),0) || 1;
+  const spectrum = SEVS.map(k => bys[k] ? `<span class="${S.sev.has(k)?'sel':''}" style="width:${bys[k]/tot*100}%;background:var(${SEV_VAR[k]})" title="${SEV_TR[k]}: ${bys[k]}"></span>` : '').join('');
+  const chips = SEVS.map(k => `<button class="sevchip ${k}" data-sev="${k}" aria-pressed="${S.sev.has(k)}">${glyph(k)}<span class="lbl">${SEV_TR[k]}</span><span class="num">${bys[k]||0}</span></button>`).join('');
+  const bs = s.by_status || {};
+  const tabs = [['all','Açık işler',s.total_findings],['new','Yeni',s.new],['acknowledged','Onaylandı',bs.acknowledged],['in_progress','İşlemde',bs.in_progress],
+    ['resolved','Çözüldü',s.resolved_count],['fixed','Düzeltilen',s.closed],['suppressed','İstisnalı',s.suppressed]]
+    .map(([k,l,n]) => `<button role="tab" data-st="${k}" aria-selected="${S.status===k}">${l}<span class="num">${n??0}</span></button>`).join('');
+  const cats = [...new Set(S.checks.map(c=>c.category))].sort();
+
+  $('page').innerHTML = `${histNote()}
+    <div class="page-head"><div><h1>Bulgular</h1><p>WAF, LTM, sertifika ve cihaz kontrollerinden çıkan, aksiyon bekleyen konular.</p></div>${scopeCrumb()}</div>
+    <section class="panel panel-pad">
+      <div class="chain-wrap">
+        <div><h2>Müşteri zinciri</h2><p class="chain-intro">Her halka bir partition'dır ve en ağır açık bulgusunun rengini taşır. Bir halkaya tıklayarak o müşteriye odaklanın.</p></div>
+        ${weak?`<div class="weakest">En zayıf halka<b>${esc(weak.customer||weak.name)}</b><button onclick="setScope('${esc(weak.device)}','${esc(weak.name)}')">Bulgularını göster</button></div>`:'<div class="weakest">Açık bulgusu olan halka yok</div>'}
+        <div class="chain" id="chain">${chain}</div>
+      </div>
+    </section>
+    <section class="panel panel-pad">
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h2>Risk dağılımı</h2><span class="muted" style="font-size:13px">${s.total_findings} açık bulgu, ${s.customers_affected} müşteride. Birden fazla önem seviyesi seçebilirsiniz.</span></div>
+      <div class="spectrum ${S.sev.size?'filtering':''}">${spectrum}</div>
+      <div class="sevchips">${chips}${S.sev.size?'<button class="clearsel" id="sevClear">Seçimi temizle</button>':''}</div>
+    </section>
+    <section class="panel">
+      <div class="tabs" role="tablist" aria-label="Takip durumu">${tabs}</div>
+      <div class="toolbar">
+        <input class="input search" id="fq" placeholder="Nesne, müşteri veya açıklama ara" value="${esc(S.q)}" aria-label="Bulgularda ara">
+        <select class="select" id="fcat" aria-label="Kategori"><option value="all">Tüm kategoriler</option>${cats.map(c=>`<option ${S.cat===c?'selected':''}>${esc(c)}</option>`).join('')}</select>
+        <select class="select" id="fchk" aria-label="Kontrol"><option value="all">Tüm kontroller</option>${S.checks.map(c=>`<option value="${esc(c.id)}" ${S.check===c.id?'selected':''}>${esc(c.id)} ${esc(c.title)}</option>`).join('')}</select>
+        ${S.status==='resolved'?`<button class="toggle" id="fchg" aria-pressed="${S.changedOnly}">Sonradan değişenler</button>`:''}
+        <span class="count" id="fcount"></span>
+      </div>
+      <div class="table-scroll"><table class="tbl"><thead><tr><th>Risk</th><th>Bulgu</th><th>Müşteri</th><th>Nesne</th><th>Durum</th></tr></thead><tbody id="fbody"><tr><td colspan="5"><div class="empty">Yükleniyor</div></td></tr></tbody></table></div>
+      <div id="fmore"></div>
+    </section>`;
+
+  const chainEl = $('chain');
+  chainEl.addEventListener('click', e => { const b=e.target.closest('.lk'); if(!b) return; const p=parts[+b.dataset.i]; hideTip(); setScope(p.device,p.name); });
+  chainEl.addEventListener('mousemove', e => { const b=e.target.closest('.lk'); if(!b) return hideTip(); const p=parts[+b.dataset.i];
+    const counts = SEVS.filter(k=>p.findings[k]).map(k=>`${SEV_TR[k]} ${p.findings[k]}`).join(', ');
+    showTip(e, `<b>${esc(p.customer||p.name)}</b><br>${esc(p.device)} / ${esc(p.name)}<br>${counts||'Açık bulgu yok'}`); });
+  chainEl.addEventListener('mouseleave', hideTip);
+  $('page').querySelectorAll('.sevchip').forEach(b => b.onclick = () => { const k=b.dataset.sev; S.sev.has(k)?S.sev.delete(k):S.sev.add(k); viewFindings(); });
+  $('sevClear') && ($('sevClear').onclick = () => { S.sev.clear(); viewFindings(); });
+  $('page').querySelectorAll('[data-st]').forEach(b => b.onclick = () => { S.status=b.dataset.st; if(S.status!=='resolved') S.changedOnly=false; viewFindings(); });
+  let deb; $('fq').oninput = e => { clearTimeout(deb); deb=setTimeout(()=>{S.q=e.target.value.trim(); loadFindings();},250); };
+  $('fcat').onchange = e => { S.cat=e.target.value; loadFindings(); };
+  $('fchk').onchange = e => { S.check=e.target.value; loadFindings(); };
+  $('fchg') && ($('fchg').onclick = () => { S.changedOnly=!S.changedOnly; viewFindings(); });
+  loadFindings();
+}
+
+async function loadFindings() {
+  const d = await api('/api/findings?' + qs({limit:500, device:S.scope.device, partition:S.scope.partition,
+    severity:[...S.sev].join(','), status:S.status, category:S.cat, check_id:S.check, search:S.q,
+    changed_only:S.changedOnly?'true':'', ...sess()}));
+  if (!d || !$('fbody')) return;
+  S.findings = d.findings || [];
+  $('fcount').textContent = `${d.total} bulgu`;
+  const body = $('fbody');
+  if (!S.findings.length) {
+    const msg = {resolved:'Çözüldü olarak işaretlenmiş bulgu yok.', fixed:'Son taramada düzeltilmiş bulgu yok.', suppressed:'config.yaml ile istisna tanımlanmış bulgu yok.', new:'Bu taramada ilk kez görülen açık bulgu yok.', acknowledged:'Onaylanmış bulgu yok.', in_progress:'Üzerinde çalışılan bulgu yok.'}[S.status] || 'Bu filtrelerle eşleşen açık bulgu yok. Filtreleri gevşeterek tekrar deneyin.';
+    body.innerHTML = `<tr><td colspan="5"><div class="empty"><h3>Sonuç yok</h3><p>${msg}</p></div></td></tr>`; $('fmore').innerHTML=''; return;
+  }
+  body.innerHTML = S.findings.map((f,i) => {
+    const cust = f.customer && f.customer!==f.partition ? f.customer : partLabel(f.partition);
+    const tags = (f.status==='NEW'&&f.wf_status!=='fixed'?'<span class="tag new">Yeni</span>':'') + (f.suppressed?'<span class="tag supp">İstisna</span>':'') + (f.is_rule_changed?'<span class="tag chg">Değişti</span>':'');
+    return `<tr class="click ${f.severity} ${f.fingerprint===S.selFp?'sel':''}" data-i="${i}" tabindex="0">
+      <td class="sevcell"><span class="sev ${f.severity}">${glyph(f.severity)}${SEV_TR[f.severity]}</span></td>
+      <td style="min-width:220px"><div class="t1">${esc(f.title)}</div><div class="ck">${esc(f.check_id)}</div></td>
+      <td style="min-width:150px"><div style="font-weight:500">${esc(cust)}</div><div class="t3">${esc(f.device)} / ${esc(partLabel(f.partition))}</div></td>
+      <td style="min-width:260px"><div class="obj">${esc(f.object_name)}</div><div class="t2 clip">${esc(f.detail)}</div></td>
+      <td><span class="st ${f.wf_status}">${WF_TR[f.wf_status]||f.wf_status}</span><div>${tags}</div></td></tr>`;
+  }).join('');
+  $('fmore').innerHTML = d.total > S.findings.length ? `<div class="more">İlk ${S.findings.length} bulgu gösteriliyor. Daha dar bir filtre seçin ya da Excel raporunu indirin.</div>` : '';
+  body.querySelectorAll('tr.click').forEach(tr => {
+    tr.onclick = () => openDrawer(+tr.dataset.i);
+    tr.onkeydown = e => { if (e.key==='Enter') openDrawer(+tr.dataset.i); };
+  });
+}
+
+/* ── Bulgu detayı (sağ panel) ── */
+let cur = null, curSt = 'open';
+function openDrawer(i) {
+  const f = cur = S.findings[i]; if (!f) return;
+  S.selFp = f.fingerprint; document.querySelectorAll('#fbody tr').forEach((tr,j)=>tr.classList.toggle('sel', j===i));
+  curSt = ['open','acknowledged','in_progress','resolved'].includes(f.wf_status) ? f.wf_status : 'open';
+  $('drawerSev').innerHTML = `<span class="sev ${f.severity}">${glyph(f.severity)}${SEV_TR[f.severity]}</span><span class="ck" style="margin-left:10px">${esc(f.check_id)}, ${esc(f.category)}</span>`;
+  $('drawerTitle').textContent = f.title;
+  const ev = Object.entries(f.evidence||{}).filter(([,v])=>v!==null&&v!==''&&!(Array.isArray(v)&&!v.length))
+    .map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(Array.isArray(v)?v.join(', '):typeof v==='object'?JSON.stringify(v):String(v))}</dd>`).join('');
+  let wf;
+  if (f.wf_status==='fixed') wf = `<div class="wf"><h4>Takip durumu</h4><span class="st fixed">Düzeltildi</span><span class="muted">Bu bulgu son taramada görülmedi; cihaz üzerinde giderilmiş.</span></div>`;
+  else if (isAdmin() && !S.hist) wf = `<div class="wf"><h4>Takip durumu</h4>
+      <div class="seg" id="wfSeg" role="group" aria-label="Takip durumu">${['open','acknowledged','in_progress','resolved'].map(k=>`<button class="${k}" data-wf="${k}" aria-pressed="${curSt===k}">${WF_TR[k]}</button>`).join('')}</div>
+      <input class="input" id="wfComment" placeholder="Not, örneğin değişiklik kaydı numarası" value="${esc(f.status_comment||'')}" aria-label="Not">
+      <input class="input" id="wfAssigned" placeholder="Sorumlu kişi" value="${esc(f.assigned_to||'')}" aria-label="Sorumlu kişi">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="faint" style="font-size:12px">${f.status_updated_by?`Son güncelleme ${esc(f.status_updated_by)}, ${fmtDate(f.status_updated_at)}`:''}</span><button class="btn primary sm" id="wfSave">Durumu kaydet</button></div></div>`;
+  else wf = `<div class="wf"><h4>Takip durumu</h4><span class="st ${f.wf_status}">${WF_TR[f.wf_status]}</span>
+      ${f.assigned_to?`<span class="muted">Sorumlu: ${esc(f.assigned_to)}</span>`:''}${f.status_comment?`<span class="muted">${esc(f.status_comment)}</span>`:''}
+      <span class="faint" style="font-size:12.5px">${S.hist?'Geçmiş taramada durum değiştirilemez.':'Durumu yalnızca yöneticiler değiştirebilir.'}</span></div>`;
+  $('drawerBody').innerHTML = `
+    ${f.is_rule_changed?`<div class="changed">Bu bulgu çözüldü olarak işaretlendikten sonra nesnede değişiklik tespit edildi (${fmtDate(f.rule_changed_at)}). Yeniden inceleyin.</div>`:''}
+    <div class="blk"><h4>Ne bulundu</h4><p>${esc(f.detail)}</p></div>
+    <div class="blk"><h4>Ne yapmalı</h4><div class="fix">${esc(f.recommendation)}</div></div>
+    <div class="blk"><h4>Nerede</h4><dl class="kv">
+      <dt>Müşteri</dt><dd>${esc(f.customer||f.partition)}</dd><dt>Partition</dt><dd>${esc(partLabel(f.partition))}</dd>
+      <dt>Cihaz</dt><dd>${esc(f.device)}</dd><dt>Nesne türü</dt><dd>${esc(f.object_type)}</dd>
+      <dt>Nesne</dt><dd class="obj">${esc(f.object_name)}</dd></dl></div>
+    ${ev?`<div class="blk"><h4>Kanıt</h4><dl class="kv">${ev}</dl></div>`:''}
+    ${f.suppressed?`<div class="blk"><h4>İstisna</h4><p>${esc(f.suppress_reason)}</p></div>`:''}
+    ${wf}
+    <p class="faint" style="font-size:12px">İlk görülme ${fmtDate(f.first_seen)}. Bulgu kimliği ${esc(f.fingerprint)}.</p>`;
+  $('drawerBody').querySelectorAll('[data-wf]').forEach(b => b.onclick = () => { curSt=b.dataset.wf; $('wfSeg').querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed', x.dataset.wf===curSt)); });
+  $('wfSave') && ($('wfSave').onclick = saveStatus);
+  $('drawer').classList.add('on'); $('drawer').setAttribute('aria-hidden','false'); $('scrim').classList.add('on');
+  $('drawerBody').scrollTop = 0; $('drawerClose').focus();
+}
+function closeDrawer(){ $('drawer').classList.remove('on'); $('drawer').setAttribute('aria-hidden','true'); $('scrim').classList.remove('on'); }
+$('drawerClose').onclick = closeDrawer; $('scrim').onclick = closeDrawer;
+async function saveStatus() {
+  const r = await api(`/api/findings/${cur.fingerprint}/status`, {method:'PATCH', body:JSON.stringify({status:curSt, comment:$('wfComment').value||null, assigned_to:$('wfAssigned').value||null})});
+  if (!r) return;
+  closeDrawer(); toast(`Durum kaydedildi: ${WF_TR[curSt]}`);
+  const [sum, devs] = await Promise.all([api('/api/summary'), api('/api/devices')]);
+  S.summary=sum; S.devices=devs||[]; renderTop(); renderScope(); viewFindings();
+}
+
+/* ───────────────────────── ASM Policyler ───────────────────────── */
+const POLMODE_TR = {blocking:'Blocking', transparent:'Transparent'};
+function daysAgo(t){ if(!t) return ''; const d=Math.floor((Date.now()-new Date(t))/864e5); return d<=0?'bugün':d===1?'dün':`${d} gün önce`; }
+async function viewPolicies() {
+  const P = S.pol;
+  if (!$('polBody') || $('page').dataset.kind!=='policies') {
+    $('page').dataset.kind = 'policies';
+    $('page').innerHTML = `${histNote()}<div class="page-head"><div><h1>ASM Policyler</h1><p>Tüm cihazlardaki WAF policy'leri; modları, bağlı oldukları virtual server'lar ve bulundukları cihaz.</p></div>${scopeCrumb()}</div><div id="polBody"><div class="panel"><div class="empty">Yükleniyor</div></div></div>`;
+  }
+  const d = await api('/api/policies?' + qs({mode:P.mode, vs:P.vs, status:P.status, search:P.q, device:S.scope.device, partition:S.scope.partition, ...sess()}));
+  if (!d || S.view!=='policies' || !$('polBody')) return;
+  const st = d.stats, rows = d.rows;
+  if (!st.total && !S.scope.device && !P.q) {
+    $('polBody').innerHTML = `<div class="panel"><div class="empty"><h3>Policy verisi yok</h3><p>Tarama tamamlandığında tüm cihazlardaki ASM policy'leri burada listelenir.</p></div></div>`; return;
+  }
+  const modeColor = m => m==='blocking'?'var(--ok)':m==='transparent'?'var(--med)':'var(--ink-3)';
+  const modes = Object.entries(st.by_mode).sort((a,b)=>b[1]-a[1]);
+  const split = modes.map(([m,n]) => `<span class="${P.mode===m?'sel':''}" style="width:${n/(st.total||1)*100}%;background:${modeColor(m)}" title="${esc(POLMODE_TR[m]||m)}: ${n}"></span>`).join('');
+  const legend = modes.map(([m,n]) => `<button class="modechip" data-pmode="${esc(m)}" aria-pressed="${P.mode===m}"><span class="mode ${esc(m)}">${esc(POLMODE_TR[m]||m)}</span><span class="num">${n}</span></button>`).join('')
+    + (P.mode!=='all' ? '<button class="clearsel" data-pmode="all">Mod filtresini kaldır</button>' : '');
+  const devchips = `<button class="devchip" data-pdev="" aria-pressed="${!S.scope.device}"><b>Tüm cihazlar<span class="num">${st.by_device.reduce((a,x)=>a+x.total,0)}</span></b><span class="mix">${st.by_device.length} cihaz</span></button>`
+    + st.by_device.map(x => `<button class="devchip" data-pdev="${esc(x.device)}" aria-pressed="${S.scope.device===x.device}">
+        <b>${esc(x.device)}<span class="num">${x.total}</span></b><span class="mono">${esc(x.host||'')}</span>
+        <span class="mix">${x.blocking} blocking, ${x.transparent} transparent</span></button>`).join('');
+  const pos = document.activeElement?.id==='polq' ? $('polq').selectionStart : null;
+  const vsCell = r => {
+    if (!r.virtual_servers.length) return '<span class="mode off">VS\'e bağlı değil</span>';
+    const open = P.open.has(r.full_path+r.device), list = open ? r.virtual_servers : r.virtual_servers.slice(0,3);
+    return `<div class="vslist">${list.map(v=>`<div><div class="obj">${esc(v.name)}</div>${v.destination?`<div class="t3">${esc(v.destination)}</div>`:''}</div>`).join('')}
+      ${r.virtual_servers.length>3?`<button class="morebtn" data-vsmore="${esc(r.full_path+r.device)}">${open?'Daha az göster':`${r.virtual_servers.length-3} VS daha`}</button>`:''}</div>`;
+  };
+  const fCell = (r,i) => { const w = worst(r.findings);
+    return r.findings_total ? `<button class="fcount" data-pf="${i}" title="Bu policy'nin açık bulgularını göster">${glyph(w)}${r.findings_total}</button>` : '<span class="faint">—</span>'; };
+  $('polBody').innerHTML = `
+    <section class="panel panel-pad">
+      <div class="polsum">
+        <div><div class="big">${st.total}</div><div class="cap">WAF policy, ${st.customers} müşteride. Toplam ${st.virtual_servers} virtual server'a bağlı.</div></div>
+        <div><div class="split ${P.mode!=='all'?'filtering':''}">${split}</div><div class="legend">${legend}</div></div>
+      </div>
+      <div class="devchips" role="group" aria-label="Cihaza göre filtrele">${devchips}</div>
+    </section>
+    <section class="panel">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Mod">${[['all','Tümü'],['blocking','Blocking'],['transparent','Transparent']].map(([k,l])=>`<button data-pmode="${k}" aria-pressed="${P.mode===k}">${l}</button>`).join('')}</div>
+        <input class="input search" id="polq" placeholder="Policy, virtual server, müşteri veya IP ara" value="${esc(P.q)}" aria-label="Policy ara">
+        <select class="select" id="polvs" aria-label="Virtual server bağlantısı">
+          <option value="all">Tüm policy'ler</option><option value="attached" ${P.vs==='attached'?'selected':''}>VS'e bağlı (${st.attached})</option>
+          <option value="orphan" ${P.vs==='orphan'?'selected':''}>VS'e bağlı değil (${st.orphan})</option></select>
+        <select class="select" id="polst" aria-label="Durum">
+          <option value="all">Her durum</option><option value="findings" ${P.status==='findings'?'selected':''}>Açık bulgusu olan</option>
+          <option value="inactive" ${P.status==='inactive'?'selected':''}>Pasif (${st.inactive})</option>
+          <option value="modified" ${P.status==='modified'?'selected':''}>Apply bekleyen (${st.modified})</option></select>
+        <span class="count">${rows.length} policy</span>
+      </div>
+      <div class="table-scroll"><table class="tbl"><thead><tr><th>Policy</th><th>Mod</th><th>Virtual server'lar</th><th>Cihaz</th><th>Son değişiklik</th><th>Learning ve staging</th><th class="r">Açık bulgu</th></tr></thead>
+      <tbody>${rows.map((r,i)=>`<tr>
+        <td style="min-width:200px"><div class="t1">${esc(r.name)}</div><div class="t2">${esc(r.customer&&r.customer!==r.partition?r.customer:r.partition)}</div><div class="t3 obj">${esc(r.full_path)}</div></td>
+        <td style="white-space:nowrap"><span class="mode ${esc(r.mode)}">${esc(POLMODE_TR[r.mode]||r.mode)}</span>
+          ${r.mode==='transparent'&&r.transparent_days?`<div class="days">en az ${r.transparent_days} gündür</div>`:''}
+          <div>${!r.active?'<span class="tag supp">Pasif</span>':''}${r.modified?'<span class="tag chg">Apply bekliyor</span>':''}</div></td>
+        <td style="min-width:240px">${vsCell(r)}</td>
+        <td style="white-space:nowrap"><div style="font-weight:600">${esc(r.device)}</div><div class="mono faint">${esc(r.device_host||'')}</div></td>
+        <td style="white-space:nowrap"><div>${r.last_change?fmtDate(r.last_change).split(' ')[0]:'—'}</div><div class="t3">${daysAgo(r.last_change)}</div></td>
+        <td style="font-size:12.5px;min-width:140px"><div>${({manual:'Manuel learning',automatic:'Otomatik learning',disabled:'Learning kapalı'})[r.learning_mode] || esc(r.learning_mode||'—')}</div>
+          <div class="t3">${r.staged_signatures!=null?`${r.staged_signatures} imza staging'de`:''}${r.disabled_signatures?`, ${r.disabled_signatures} devre dışı`:''}</div></td>
+        <td class="r">${fCell(r,i)}</td></tr>`).join('')
+        || `<tr><td colspan="7"><div class="empty"><h3>Eşleşen policy yok</h3><p>Filtreleri gevşeterek tekrar deneyin.</p></div></td></tr>`}</tbody></table></div>
+    </section>`;
+  const B = $('polBody');
+  B.querySelectorAll('[data-pmode]').forEach(b => b.onclick = () => { const m=b.dataset.pmode; P.mode = (P.mode===m && b.classList.contains('modechip')) ? 'all' : m; viewPolicies(); });
+  B.querySelectorAll('[data-pdev]').forEach(b => b.onclick = () => setScope(b.dataset.pdev||null, null));
+  B.querySelectorAll('[data-vsmore]').forEach(b => b.onclick = () => { const k=b.dataset.vsmore; P.open.has(k)?P.open.delete(k):P.open.add(k); viewPolicies(); });
+  B.querySelectorAll('[data-pf]').forEach(b => b.onclick = () => { const r=rows[+b.dataset.pf];
+    S.scope={device:r.device, partition:r.partition}; S.q=r.name; S.status='all'; S.sev.clear(); S.cat='all'; S.check='all'; renderScope(); location.hash='bulgular'; });
+  $('polvs').onchange = e => { P.vs=e.target.value; viewPolicies(); };
+  $('polst').onchange = e => { P.status=e.target.value; viewPolicies(); };
+  const inp=$('polq'); if (pos!==null) { inp.focus(); inp.setSelectionRange(pos,pos); }
+  let deb; inp.oninput = e => { clearTimeout(deb); deb=setTimeout(()=>{ P.q=e.target.value.trim(); viewPolicies(); },300); };
+}
+
+/* ───────────────────────── Müşteriler ───────────────────────── */
+function viewCustomers() {
+  const q = S.custQ.toLowerCase();
+  const rows = partitionsFlat().filter(p => !q || (p.name+' '+(p.customer||'')+' '+p.device).toLowerCase().includes(q))
+    .sort((a,b)=>b.score-a.score || a.device.localeCompare(b.device) || a.name.localeCompare(b.name));
+  const max = Math.max(1, ...rows.map(r=>r.score));
+  const K = ['CRITICAL','HIGH','MEDIUM','LOW'];
+  $('page').innerHTML = `${histNote()}
+    <div class="page-head"><div><h1>Müşteriler</h1><p>Partition'lar risk puanına göre sıralanır. Puan, açık bulguların ağırlıklı toplamıdır: Kritik 40, Yüksek 15, Orta 5, Düşük 1.</p></div></div>
+    <section class="panel">
+      <div class="toolbar"><input class="input search" id="cq" placeholder="Müşteri veya partition ara" value="${esc(S.custQ)}" aria-label="Müşteri ara"><span class="count">${rows.length} partition</span></div>
+      <div class="table-scroll"><table class="tbl"><thead><tr><th>Müşteri</th><th>Cihaz</th><th class="r">Puan</th><th style="width:28%">Dağılım</th>${K.map(k=>`<th class="r"><span class="sev ${k}" style="font-size:12px">${glyph(k)}${SEV_TR[k]}</span></th>`).join('')}</tr></thead>
+      <tbody>${rows.map(p=>`<tr class="click" data-d="${esc(p.device)}" data-p="${esc(p.name)}" tabindex="0">
+        <td><div class="t1">${esc(p.customer&&p.customer!==p.name?p.customer:p.name)}</div>${p.customer&&p.customer!==p.name?`<div class="t3">${esc(p.name)}</div>`:''}</td>
+        <td>${esc(p.device)}</td><td class="r num" style="font-size:16px;font-weight:600">${p.score}</td>
+        <td><div class="bar">${K.map(k=>p.findings[k]?`<span style="width:${p.findings[k]*W[k]/max*100}%;background:var(${SEV_VAR[k]})"></span>`:'').join('')}</div></td>
+        ${K.map(k=>`<td class="r num" style="${p.findings[k]?`color:var(${SEV_VAR[k]});font-weight:600`:'color:var(--ink-3)'}">${p.findings[k]}</td>`).join('')}</tr>`).join('')
+        || `<tr><td colspan="8"><div class="empty"><h3>Kayıt yok</h3><p>Tarama tamamlandığında müşteriler burada listelenir.</p></div></td></tr>`}</tbody></table></div>
+    </section>`;
+  $('cq').oninput = e => { S.custQ = e.target.value; const pos=e.target.selectionStart; viewCustomers(); const n=$('cq'); n.focus(); n.setSelectionRange(pos,pos); };
+  $('page').querySelectorAll('tr.click').forEach(tr => { const go=()=>{S.scope={device:tr.dataset.d,partition:tr.dataset.p}; renderScope(); location.hash='bulgular';}; tr.onclick=go; tr.onkeydown=e=>{if(e.key==='Enter')go();}; });
+}
+
+/* ───────────────────────── DoS / Bot Protection ───────────────────────── */
+async function viewProtection(kind) {
+  const P = S.prot[kind], title = kind==='dos'?'DoS Protection':'Bot Protection';
+  const intro = kind==='dos'
+    ? "Virtual server'lara bağlı DoS profilleri. Mod, profildeki en güçlü uygulama (L7) DoS algılamasına göre gösterilir."
+    : "Virtual server'lara bağlı Bot Defense profilleri ve modları. v14.1 öncesinde DoS profili içinde tanımlanan bot korumaları da dahildir.";
+  if (!$('protBody') || $('page').dataset.kind!==kind) {
+    $('page').dataset.kind = kind;
+    $('page').innerHTML = `${histNote()}<div class="page-head"><div><h1>${title}</h1><p>${intro}</p></div>${scopeCrumb()}</div><div id="protBody"><div class="panel"><div class="empty">Yükleniyor</div></div></div>`;
+  }
+  const d = await api('/api/protections?' + qs({kind, show:P.show, mode:P.mode, search:P.q, device:S.scope.device, partition:S.scope.partition, ...sess()}));
+  if (!d || S.view!==kind || !$('protBody')) return;
+  const st = d.stats, pct = st.eligible ? Math.round(st.covered/st.eligible*100) : 0;
+  const modes = Object.entries(st.by_mode).sort((a,b)=>b[1]-a[1]);
+  const modeCell = r => { const k=r[kind]; return k ? `<span class="mode ${esc(k.mode)}">${esc(MODE_TR[k.mode]||k.mode)}</span>` : `<span class="mode none">Koruma yok</span>`; };
+  const detail = r => { const k=r[kind]; if(!k) return '<span class="faint">—</span>';
+    if (kind==='dos') { const det = Object.entries(k.detections||{}).map(([a,b])=>`${esc(a)}: ${esc(MODE_TR[b]||b)}`).join('<br>');
+      return det || (k.kind==='network'?'<span class="faint">Uygulama DoS ayarı yok</span>':'<span class="faint">—</span>'); }
+    return [k.template?`Şablon: ${esc(k.template)}`:'', k.source==='dos-legacy'?'DoS profili üzerinden (eski yöntem)':''].filter(Boolean).join('<br>') || '<span class="faint">—</span>'; };
+  const scopeTxt = S.scope.device ? 'Seçili kapsamda' : 'Tüm cihazlarda';
+  const pos = document.activeElement?.id==='pq' ? $('pq').selectionStart : null;
+  $('protBody').innerHTML = `
+    <section class="panel panel-pad">
+      <div class="cover">
+        <div><div class="big">${st.covered}<small> / ${st.eligible}</small></div><div class="cap">HTTP virtual server korunuyor</div></div>
+        <div><div class="meter" title="Kapsam %${pct}"><span style="width:${pct}%"></span></div>
+          <div class="cap" style="margin-top:8px">${scopeTxt} korunması beklenen ${st.eligible} HTTP virtual server'dan ${st.unused} tanesinde ${kind==='dos'?'DoS':'Bot'} profili yok. Yalnızca yönlendirme yapan 80 portlu VS'ler bu hesaba katılmaz. Toplam ${st.used} VS profil kullanıyor; ${st.customers_used} müşteride en az bir VS korumalı.</div></div>
+      </div>
+      ${modes.length?`<div class="modes">${modes.map(([m,n])=>`<button class="modechip" data-mode="${esc(m)}" aria-pressed="${P.mode===m}"><span class="mode ${esc(m)}">${esc(MODE_TR[m]||m)}</span><span class="num">${n}</span></button>`).join('')}${P.mode!=='all'?'<button class="clearsel" data-mode="all">Mod filtresini kaldır</button>':''}</div>`:''}
+    </section>
+    <section class="panel">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Gösterilecek virtual server'lar">${[['used','Kullananlar'],['unused','Kullanmayanlar'],['all','Tümü']].map(([k,l])=>`<button data-show="${k}" aria-pressed="${P.show===k}">${l}</button>`).join('')}</div>
+        <input class="input search" id="pq" placeholder="Virtual server, profil veya müşteri ara" value="${esc(P.q)}" aria-label="Ara">
+        <span class="count">${d.rows.length} virtual server</span>
+      </div>
+      <div class="table-scroll"><table class="tbl"><thead><tr><th>Müşteri</th><th>Virtual server</th><th>Profil</th><th>Mod</th><th>${kind==='dos'?'Algılamalar':'Ayrıntı'}</th><th>WAF policy</th></tr></thead>
+      <tbody>${d.rows.map(r=>`<tr>
+        <td style="min-width:150px"><div style="font-weight:500">${esc(r.customer&&r.customer!==r.partition?r.customer:r.partition)}</div><div class="t3">${esc(r.device)} / ${esc(r.partition)}</div></td>
+        <td style="min-width:240px"><div class="obj">${esc(r.virtual)}</div><div class="t3">${esc(r.destination)}${r.availability&&r.availability!=='available'?`, ${esc(r.availability)}`:''}</div></td>
+        <td style="min-width:180px">${r[kind]?`<span class="obj">${esc(r[kind].profile)}</span>`:'<span class="faint">—</span>'}</td>
+        <td>${modeCell(r)}</td><td style="font-size:12.5px;min-width:150px">${detail(r)}</td>
+        <td>${r.waf_policy?`<span class="obj" title="${esc(r.waf_policy)}">${esc(r.waf_policy.split('/').pop())}</span>`:'<span class="mode off">Yok</span>'}</td></tr>`).join('')
+        || `<tr><td colspan="6"><div class="empty"><h3>${P.show==='unused'?'Korumasız virtual server yok':'Kayıt yok'}</h3><p>${P.show==='unused'?"Kapsamdaki tüm HTTP virtual server'lar bu korumayı kullanıyor.":"Bu filtrelerle eşleşen virtual server bulunamadı."}</p></div></td></tr>`}</tbody></table></div>
+    </section>`;
+  $('protBody').querySelectorAll('[data-show]').forEach(b => b.onclick = () => { P.show=b.dataset.show; if(P.show==='unused') P.mode='all'; viewProtection(kind); });
+  $('protBody').querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { P.mode = P.mode===b.dataset.mode ? 'all' : b.dataset.mode; if(P.mode!=='all') P.show='used'; viewProtection(kind); });
+  const inp = $('pq'); if (pos!==null) { inp.focus(); inp.setSelectionRange(pos,pos); }
+  let deb; inp.oninput = e => { clearTimeout(deb); deb=setTimeout(()=>{ P.q=e.target.value.trim(); viewProtection(kind); },300); };
+}
+
+/* ───────────────────────── Cihazlar ───────────────────────── */
+function viewDevices() {
+  $('page').innerHTML = `${histNote()}<div class="page-head"><div><h1>Cihazlar</h1><p>Son taramada her cihazdan toplanan özet ve bağlantı durumu.</p></div></div>
+    <div class="devgrid">${S.devices.map(d=>`<section class="panel panel-pad dev">
+      <h2><span class="health ${d.ok?'ok':'err'}"></span>${esc(d.id)}<span class="faint" style="font-family:var(--text);font-size:13px;font-weight:400">${d.version?'BIG-IP '+esc(d.version):''}</span></h2>
+      <div class="host">${esc(d.host)}</div>
+      <div class="facts">
+        <div><b>${d.partitions.filter(p=>p.name!=='(cihaz)').length}</b><span>partition</span></div>
+        <div><b>${d.stats.virtuals??'—'}</b><span>virtual server</span></div>
+        <div><b>${d.stats.policies??'—'}</b><span>WAF policy</span></div>
+        <div><b>${d.stats.dos??'—'}</b><span>DoS profilli VS</span></div>
+        <div><b>${d.stats.bot??'—'}</b><span>Bot profilli VS</span></div>
+        <div><b style="color:${d.total?'var(--high)':'inherit'}">${d.total}</b><span>açık bulgu</span></div>
+      </div>
+      ${d.error?`<div class="err">${esc(d.error)}</div>`:''}
+      <p class="faint" style="font-size:12px;margin-top:12px">Tarama süresi ${d.duration_sec??'—'} sn</p></section>`).join('')
+      || `<section class="panel"><div class="empty"><h3>Cihaz verisi yok</h3><p>Tarama tamamlandığında cihazlar burada görünür.</p></div></section>`}</div>`;
+}
+
+/* ───────────────────────── Tarama ───────────────────────── */
+async function openScan() {
+  openDlg('scanDlg');
+  const box=$('devPick'); box.innerHTML='<p class="faint">Cihazlar yükleniyor</p>';
+  const devs = await api('/api/connectors');
+  if (!devs || !devs.length) { box.innerHTML = '<p class="msg err">config.yaml içinde cihaz tanımlı değil.</p>'; return; }
+  box.innerHTML = devs.map(d=>`<label><input type="checkbox" value="${esc(d.id)}" checked><span style="flex:1"><b>${esc(d.label)}</b>${d.mock?' <span class="tag supp" style="margin:0 0 0 6px">Demo</span>':''}<br><span class="mono">${esc(d.host)}</span></span></label>`).join('');
+  box.querySelectorAll('input').forEach(c=>c.onchange=syncPickAll); syncPickAll();
+}
+function picks(){ return [...$('devPick').querySelectorAll('input')]; }
+function syncPickAll(){ const a=picks(), c=a.filter(x=>x.checked); $('pickAll').checked = a.length>0 && c.length===a.length; $('pickAll').indeterminate = c.length>0 && c.length<a.length; }
+$('pickAll').onchange = e => { picks().forEach(c=>c.checked=e.target.checked); };
+$('scanBtn').onclick = openScan;
+$('scanGo').onclick = async () => {
+  const a=picks(), ids=a.filter(c=>c.checked).map(c=>c.value);
+  if (!ids.length) { toast('En az bir cihaz seçin.', true); return; }
+  const r = await api('/api/scan', {method:'POST', body:JSON.stringify({device_ids: ids.length===a.length?null:ids, partitions:$('scanParts').value})});
+  if (!r) return;
+  closeDlg('scanDlg');
+  if (r.already_running) toast('Zaten süren bir tarama var; ilerlemesi gösteriliyor.');
+  track(Date.now());
+};
+async function checkRunning(){ const s = await api('/api/scan/status',{quiet:true}); if (s?.running) track(new Date(s.scan.started_at).getTime()); }
+function track(start) {
+  $('progress').classList.add('on');
+  const ic=$('pIcon'); ic.className='spinner'; ic.textContent=''; ic.style.background='';
+  $('pTitle').textContent='Tarama sürüyor'; $('pSub').textContent='Cihazlara bağlanılıyor'; $('pList').innerHTML='';
+  $('scanBtn').disabled=true; $('scanBtn').textContent='Tarama sürüyor';
+  clearInterval(S.tick); clearInterval(S.poll);
+  S.tick = setInterval(()=>{ const s=Math.max(0,Math.floor((Date.now()-start)/1000)); $('pTimer').textContent=String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); },1000);
+  S.poll = setInterval(pollScan, 2000); pollScan();
+}
+async function pollScan() {
+  const s = await api('/api/scan/status',{quiet:true}); if (!s) return;
+  const prog = s.progress || {}, names = Object.keys(prog).sort();
+  const lbl = {queued:'Sırada', running:'Taranıyor', done:'Tamamlandı', error:'Hata'};
+  $('pList').innerHTML = names.map(n=>{ const p=prog[n];
+    const info = p.state==='done' ? `${p.partitions} partition, ${p.policies} policy, ${p.virtuals} VS, ${p.findings} bulgu` : p.state==='error' ? esc(p.error||'') : '';
+    return `<div class="pdev"><b>${esc(n)}</b><span class="s-${p.state}">${lbl[p.state]||p.state}</span>${info?`<span></span><span class="faint">${info}</span>`:''}</div>`; }).join('');
+  const done = names.filter(n=>['done','error'].includes(prog[n].state)).length;
+  if (s.running) { $('pSub').textContent = names.length ? `${done} / ${names.length} cihaz tamamlandı` : 'Başlatılıyor'; return; }
+  clearInterval(S.poll); clearInterval(S.tick);
+  const sc = s.scan || {}, ok = sc.status==='completed', partial = sc.status==='partial';
+  const ic=$('pIcon'); ic.className='donemark'; ic.textContent = ok?'✓':partial?'!':'✕'; ic.style.background = ok?'var(--ok)':partial?'var(--high)':'var(--crit)';
+  $('pTitle').textContent = ok?'Tarama tamamlandı':partial?'Tarama kısmen tamamlandı':'Tarama başarısız';
+  $('pSub').textContent = sc.status==='failed' ? (sc.error||'Ayrıntılar için sunucu loglarına bakın.') : `${sc.devices_ok}/${sc.devices_total} cihaz, ${sc.total_findings} bulgu, ${sc.new} yeni, ${sc.closed} düzeltilen`;
+  $('scanBtn').disabled=false; $('scanBtn').textContent='Taramayı başlat';
+  if (S.hist) exitHist(); else loadAll();
+  setTimeout(()=>$('progress').classList.remove('on'), ok?6000:15000);
+}
+
+/* ───────────────────────── Geçmiş ───────────────────────── */
+$('histBtn').onclick = async () => {
+  openDlg('histDlg'); $('histBody').innerHTML='<div class="empty">Yükleniyor</div>';
+  const list = await api('/api/scan/history?limit=40'); if (!list) return;
+  $('histBody').innerHTML = `<table class="tbl"><thead><tr><th>Durum</th><th>Başlangıç</th><th>Başlatan</th><th>Kapsam</th><th class="r">Cihaz</th><th class="r">Bulgu</th><th class="r">Yeni</th><th class="r">Düzeltilen</th><th class="r">Süre</th><th></th></tr></thead><tbody>
+    ${list.map(s=>{ const dur = s.finished_at ? Math.round((new Date(s.finished_at)-new Date(s.started_at))/1000)+' sn' : '—';
+      const rq = s.request||{}, kap = [(rq.devices||[]).join(', ')||'Tüm cihazlar', (rq.partitions||[]).join(', ')].filter(Boolean).join('; ');
+      const can = ['completed','partial'].includes(s.status), label = fmtDate(s.started_at);
+      return `<tr title="${esc(s.error||'')}"><td><span class="st ${s.status==='completed'?'resolved':s.status==='failed'?'failed':'in_progress'}">${SCAN_TR[s.status]||s.status}</span></td>
+        <td style="white-space:nowrap">${label}</td><td>${esc(s.triggered_by)}</td><td class="t2" style="max-width:200px">${esc(kap)}</td>
+        <td class="r num">${s.devices_ok??'—'}/${s.devices_total??'—'}</td><td class="r num">${s.total_findings??'—'}</td><td class="r num">${s.new??'—'}</td><td class="r num">${s.closed??'—'}</td><td class="r">${dur}</td>
+        <td style="white-space:nowrap;text-align:right">${can?`<button class="btn sm" data-view-hist="${s.id}" data-label="${esc(label)}">${S.hist===s.id?'Görüntüleniyor':'Görüntüle'}</button> <button class="btn sm quiet" data-dl="${s.id}">Excel</button>`:''}</td></tr>`; }).join('')
+      || '<tr><td colspan="10"><div class="empty"><h3>Henüz tarama yok</h3></div></td></tr>'}</tbody></table>`;
+  $('histBody').querySelectorAll('[data-view-hist]').forEach(b => b.onclick = () => viewHist(b.dataset.viewHist, b.dataset.label));
+  $('histBody').querySelectorAll('[data-dl]').forEach(b => b.onclick = () => download('xlsx', b.dataset.dl));
+};
+async function viewHist(id, label){ S.hist=id; S.histLabel=label; S.scope={device:null,partition:null}; closeDlg('histDlg'); S.openDevs.clear(); delete $('page').dataset.kind; await loadAll(); }
+async function exitHist(){ S.hist=null; S.histLabel=''; S.openDevs.clear(); delete $('page').dataset.kind; await loadAll(); }
+
+/* ───────────────────────── Rapor & menüler ───────────────────────── */
+function download(fmt, sid) {
+  const url = `/api/report/${fmt}?` + qs({token:S.token, session_id:sid || S.hist});
+  if (fmt==='html') window.open(url,'_blank'); else location.href = url;
+}
+function placeMenu(menu, btn){ const r=btn.getBoundingClientRect(); menu.style.top=(r.bottom+6)+'px'; menu.style.right=(innerWidth-r.right)+'px'; menu.hidden=false; }
+function hideMenus(){ $('reportMenu').hidden=true; $('userMenu').hidden=true; }
+$('reportBtn').onclick = e => { e.stopPropagation(); const m=$('reportMenu'), was=!m.hidden; hideMenus(); if(!was) placeMenu(m, e.currentTarget); };
+$('avatarBtn').onclick = e => { e.stopPropagation(); const m=$('userMenu'), was=!m.hidden; hideMenus(); if(!was) placeMenu(m, e.currentTarget); };
+$('reportMenu').onclick = e => { const b=e.target.closest('[data-fmt]'); if(b){ hideMenus(); download(b.dataset.fmt); } };
+$('logoutBtn').onclick = () => { hideMenus(); logout(); };
+document.addEventListener('click', e => { if (!e.target.closest('.menu')) hideMenus(); });
+
+/* ───────────────────────── Kullanıcılar ───────────────────────── */
+$('usersBtn').onclick = () => { hideMenus(); openDlg('usersDlg'); renderUsers(); };
+let USERS = [];
+async function renderUsers(okMsg) {
+  const list = await api('/api/auth/users'); if (!list) return; USERS = list;
+  $('usersBody').innerHTML = `<div class="table-scroll"><table class="tbl"><thead><tr><th>Kullanıcı</th><th>Ad soyad</th><th>Rol</th><th>Durum</th><th>Oluşturulma</th><th></th></tr></thead><tbody>
+    ${list.map(u=>`<tr><td class="t1">${esc(u.username)}${u.username===S.user.username?' <span class="faint" style="font-weight:400">(siz)</span>':''}</td><td>${esc(u.full_name||'')}</td>
+      <td>${u.role==='admin'?'Yönetici':'Görüntüleyici'}</td><td><span class="st ${u.is_active?'resolved':''}">${u.is_active?'Aktif':'Pasif'}</span></td><td class="t2">${fmtDate(u.created_at)}</td>
+      <td style="white-space:nowrap;text-align:right"><button class="btn sm" data-edit="${u.id}">Düzenle</button>
+      ${u.username!==S.user.username?` <button class="btn sm" data-toggle="${u.id}">${u.is_active?'Pasifleştir':'Etkinleştir'}</button> <button class="btn sm danger" data-del="${u.id}" data-name="${esc(u.username)}">Sil</button>`:''}</td></tr>`).join('')}</tbody></table></div>
+    <div class="dialog-body" style="border-top:1px solid var(--line)">
+      <h3 style="font-family:var(--display);font-weight:600;font-size:16px;margin-bottom:12px">Yeni kullanıcı ekle</h3>
+      <div class="msg err" id="uErr" hidden></div>${okMsg?`<div class="msg ok">${esc(okMsg)}</div>`:''}
+      <div class="grid2">
+        <div class="field"><label for="nU">Kullanıcı adı</label><input class="input" id="nU" autocomplete="off"></div>
+        <div class="field"><label for="nF">Ad soyad</label><input class="input" id="nF"></div>
+        <div class="field"><label for="nP">Parola (en az 8 karakter)</label><input class="input" id="nP" type="password" autocomplete="new-password"></div>
+        <div class="field"><label for="nR">Rol</label><select class="select" id="nR" style="height:40px;max-width:none"><option value="readonly">Görüntüleyici</option><option value="admin">Yönetici</option></select></div>
+      </div>
+      <div style="margin-top:14px;text-align:right"><button class="btn primary" id="nGo">Kullanıcıyı ekle</button></div>
+    </div>`;
+  $('nGo').onclick = addUser;
+  $('usersBody').querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editUser(+b.dataset.edit));
+  $('usersBody').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => { if (await api(`/api/auth/users/${b.dataset.toggle}`,{method:'PATCH'})) renderUsers(); });
+  $('usersBody').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm(`${b.dataset.name} kullanıcısı kalıcı olarak silinsin mi?`)) return;
+    if (await api(`/api/auth/users/${b.dataset.del}`,{method:'DELETE'})) renderUsers(`${b.dataset.name} silindi.`); });
+}
+async function addUser() {
+  const body = {username:$('nU').value.trim(), full_name:$('nF').value.trim(), password:$('nP').value, role:$('nR').value};
+  if (!body.username || !body.password) { $('uErr').textContent='Kullanıcı adı ve parola gerekli.'; $('uErr').hidden=false; return; }
+  if (await api('/api/auth/users',{method:'POST',body:JSON.stringify(body)})) renderUsers(`${body.username} eklendi.`);
+}
+function editUser(id){ const u=USERS.find(x=>x.id===id); if(!u) return;
+  $('editId').value=u.id; $('editUsername').value=u.username; $('editFullname').value=u.full_name||''; $('editRole').value=u.role; $('editPassword').value=''; openDlg('editDlg'); }
+$('editSave').onclick = async () => {
+  const body={full_name:$('editFullname').value, role:$('editRole').value}; if ($('editPassword').value) body.password=$('editPassword').value;
+  if (await api(`/api/auth/users/${$('editId').value}`,{method:'PUT',body:JSON.stringify(body)})) { closeDlg('editDlg'); renderUsers('Değişiklikler kaydedildi.'); }
+};
+
+/* ───────────────────────── Genel ───────────────────────── */
+function openDlg(id){ $(id).classList.add('on'); }
+function closeDlg(id){ $(id).classList.remove('on'); }
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => closeDlg(b.dataset.close));
+document.querySelectorAll('.overlay').forEach(o => o.addEventListener('click', e => { if (e.target===o) closeDlg(o.id); }));
+document.addEventListener('keydown', e => { if (e.key==='Escape') { closeDrawer(); hideMenus(); document.querySelectorAll('.overlay.on').forEach(o=>closeDlg(o.id)); } });
+function showTip(e, html){ const t=$('tip'); t.innerHTML=html; t.hidden=false; t.style.left=Math.min(e.clientX+14, innerWidth-t.offsetWidth-10)+'px'; t.style.top=(e.clientY+16)+'px'; }
+function hideTip(){ $('tip').hidden=true; }
+
+if (S.token && S.user) enterApp(); else { $('login').hidden=false; setTimeout(()=>$('inputUser').focus(),50); }
+</script>
+</body>
+</html>

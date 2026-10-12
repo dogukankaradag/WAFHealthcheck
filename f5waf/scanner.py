@@ -7,11 +7,13 @@ import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from typing import Callable
 from datetime import datetime, timezone
 
 from .checks import DEVICE_PARTITION, run_checks
 from .client import F5Client
 from .collector import Collector
+from .protections import build_inventory, build_policy_inventory
 from .models import SEVERITIES, SEVERITY_WEIGHT, Config, DeviceResult, Finding
 from .state import StateStore
 
@@ -97,12 +99,18 @@ class Scanner:
         return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
 
     def run(self, devices: list[str] | None = None, partitions: list[str] | None = None,
-            scan_id: str | None = None) -> ScanResult:
+            scan_id: str | None = None, triggered_by: str = "cli",
+            progress: Callable[[str, str, dict], None] | None = None) -> ScanResult:
+        """progress(cihaz, durum, bilgi): durum = queued | running | done | error"""
         scan_id = scan_id or self.new_scan_id()
         res = ScanResult(scan_id, datetime.now(timezone.utc))
-        self.store.start_scan(scan_id, res.started_at)
+        self.store.start_scan(scan_id, res.started_at, triggered_by,
+                              {"devices": devices, "partitions": partitions})
+        notify = progress or (lambda *a: None)
 
         targets = [d for d in self.cfg.devices if not devices or d["name"] in devices]
+        for d in targets:
+            notify(d["name"], "queued", {})
 
         def pfilter(p: str) -> bool:
             if not self.cfg.partition_selected(p):
@@ -113,6 +121,7 @@ class Scanner:
             dr = DeviceResult(dev["name"], dev.get("host", "mock"))
             t0 = time.time()
             client = None
+            notify(dev["name"], "running", {})
             try:
                 client = make_client(dev)
                 snap = Collector(client, dev["name"], self.cfg.policy_workers, pfilter).collect()
@@ -122,15 +131,24 @@ class Scanner:
                             "policies": len(snap.policies), "certs": len(snap.certs),
                             "warnings": len(snap.warnings)}
                 found = run_checks(snap, self.cfg, lambda k: self.store.observe(k, snap.collected_at))
+                dr.protections = build_inventory(snap, self.cfg)
+                dr.asm_policies = build_policy_inventory(snap, self.cfg)
+                dr.stats["dos"] = sum(1 for r in dr.protections if r["dos"])
+                dr.stats["bot"] = sum(1 for r in dr.protections if r["bot"])
                 if snap.warnings and not snap.virtuals and not snap.policies:
                     dr.ok, dr.error = False, snap.warnings[0]
+                dr.duration_sec = round(time.time() - t0, 1)
+                notify(dev["name"], "done" if dr.ok else "error",
+                       {**dr.stats, "partitions": len(dr.partitions), "findings": len(found),
+                        "error": dr.error, "duration_sec": dr.duration_sec})
                 return dr, found
             except Exception as e:
                 log.exception("%s taranamadı", dev["name"])
                 dr.ok, dr.error = False, str(e)
+                dr.duration_sec = round(time.time() - t0, 1)
+                notify(dev["name"], "error", {"error": dr.error, "duration_sec": dr.duration_sec})
                 return dr, []
             finally:
-                dr.duration_sec = round(time.time() - t0, 1)
                 if client is not None and hasattr(client, "logout"):
                     client.logout()
 
@@ -157,13 +175,9 @@ class Scanner:
                 f.status, f.first_seen = "NEW", res.started_at.isoformat()
 
         scope = {d.name: set(d.partitions) | {DEVICE_PARTITION} for d in res.devices if d.ok}
-        prev = self.store.previous_scan_id(scan_id)
-        if prev:
-            current = {f.fingerprint for f in res.findings}
-            for old in self.store.findings_of(prev):
-                if old["device"] in scope and old["partition"] in scope[old["device"]] \
-                        and old["fingerprint"] not in current and not old.get("suppressed"):
-                    res.resolved.append(old)
+        current = {f.fingerprint for f in res.findings}
+        res.resolved = [old for old in self.store.previous_findings(scan_id, scope)
+                        if old["fingerprint"] not in current and not old.get("suppressed")]
 
         self.store.prune_observations(scope)
         res.finished_at = datetime.now(timezone.utc)
@@ -176,4 +190,5 @@ class Scanner:
                                devices=[d.__dict__ for d in res.devices],
                                findings=[f.to_dict() for f in res.findings],
                                error="; ".join(f"{d.name}: {d.error}" for d in res.devices if not d.ok))
+        self.store.detect_changes([f.to_dict() for f in res.findings])
         return res

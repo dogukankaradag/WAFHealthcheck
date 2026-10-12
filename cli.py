@@ -53,6 +53,35 @@ def cmd_checks(_):
         print(f"{c['id']:<9} [{c['category']}] {c['title']}\n          {c['description']}\n")
 
 
+def cmd_user(a):
+    import getpass
+    from f5waf.auth import ROLES, hash_password, password_problem
+    from f5waf.state import StateStore
+    store = StateStore(Config.load(a.config).state_db)
+    if a.action == "list":
+        for u in store.list_users():
+            print(f"{u['id']:>3}  {u['username']:<20} {u['role']:<9} {'aktif' if u['is_active'] else 'pasif'}  {u['full_name'] or ''}")
+        return
+    if not a.username:
+        sys.exit("Kullanıcı adı gerekli: python cli.py user add <ad>")
+    pw = a.password or getpass.getpass("Parola: ")
+    if (p := password_problem(pw)):
+        sys.exit(p)
+    u = store.get_user(a.username)
+    if a.action == "add":
+        if u:
+            sys.exit("Bu kullanıcı zaten var; parolayı değiştirmek için 'passwd' kullanın.")
+        if a.role not in ROLES:
+            sys.exit("Rol admin veya readonly olmalı.")
+        store.create_user(a.username, hash_password(pw), a.role, a.full_name or "")
+        print(f"Kullanıcı oluşturuldu: {a.username} ({a.role})")
+    else:  # passwd
+        if not u:
+            sys.exit("Kullanıcı bulunamadı.")
+        store.update_user(u["id"], password_hash=hash_password(pw), is_active=1)
+        print(f"Parola güncellendi: {a.username}")
+
+
 def cmd_serve(a):
     import uvicorn
     os.environ["F5WAF_CONFIG"] = a.config
@@ -73,10 +102,18 @@ def main():
     s.set_defaults(fn=cmd_scan)
     c = sub.add_parser("checks", help="Kontrol kataloğunu listele")
     c.set_defaults(fn=cmd_checks)
-    v = sub.add_parser("serve", help="REST API'yi başlat")
+    u = sub.add_parser("user", help="Web arayüzü kullanıcıları: list | add | passwd")
+    u.add_argument("action", choices=["list", "add", "passwd"])
+    u.add_argument("username", nargs="?")
+    u.add_argument("-c", "--config", default="config.yaml")
+    u.add_argument("--role", default="readonly", help="add için: admin | readonly")
+    u.add_argument("--full-name")
+    u.add_argument("--password", help="Verilmezse sorulur (önerilen)")
+    u.set_defaults(fn=cmd_user)
+    v = sub.add_parser("serve", help="Web arayüzü + API'yi başlat")
     v.add_argument("-c", "--config", default="config.yaml")
     v.add_argument("--host", default="0.0.0.0")
-    v.add_argument("--port", type=int, default=8080)
+    v.add_argument("--port", type=int, default=4467)
     v.set_defaults(fn=cmd_serve)
     a = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.WARNING,
