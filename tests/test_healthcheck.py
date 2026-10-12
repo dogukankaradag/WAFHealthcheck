@@ -450,3 +450,32 @@ def test_dotenv_autoload_and_empty_credentials(tmp_path, monkeypatch):
     assert cfg.missing_env == ["HC_TEST_GONE"]
     with pytest.raises(F5Error, match="boş"):
         F5Client("1.1.1.2", "wafhc", "").login()
+
+
+def test_rejected_credentials_are_not_retried(monkeypatch):
+    from f5waf import client as cmod
+    cmod.clear_auth_failures()
+    calls = []
+
+    class R:
+        status_code = 401
+        text = '{"code":401,"message":"Maximum number of login attempts exceeded."}'
+
+        def json(self):
+            return {"code": 401, "message": "Maximum number of login attempts exceeded."}
+
+    c = cmod.F5Client("10.0.0.1", "u", "p", verify_ssl=False)
+    monkeypatch.setattr(c.session, "post", lambda *a, **k: calls.append(1) or R())
+    with pytest.raises(cmod.F5Error, match="Unlock"):
+        c.login()
+    c2 = cmod.F5Client("10.0.0.1", "u", "p", verify_ssl=False)
+    monkeypatch.setattr(c2.session, "post", lambda *a, **k: calls.append(1) or R())
+    with pytest.raises(cmod.F5Error, match="tekrar denenmedi"):
+        c2.login()
+    assert len(calls) == 1          # ikinci tarama cihaza hiç gitmedi
+    c3 = cmod.F5Client("10.0.0.1", "u", "yeni", verify_ssl=False)   # parola değişince denenir
+    monkeypatch.setattr(c3.session, "post", lambda *a, **k: calls.append(1) or R())
+    with pytest.raises(cmod.F5Error):
+        c3.login()
+    assert len(calls) == 2
+    cmod.clear_auth_failures()

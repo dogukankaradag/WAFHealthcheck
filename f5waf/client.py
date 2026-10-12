@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import threading
@@ -23,6 +24,22 @@ log = logging.getLogger(__name__)
 
 class F5Error(Exception):
     pass
+
+
+# Reddedilen giriş bilgileri (süreç ömrü boyunca). Aynı host+kullanıcı+parola ile tekrar tekrar
+# denenip cihazdaki hesabın kilitlenmesini (max-login-failures) önlemek için kullanılır.
+_AUTH_FAILURES: dict[str, tuple[float, str]] = {}
+_AUTH_LOCK = threading.Lock()
+AUTH_RETRY_AFTER = 30 * 60  # sn - aynı bilgilerle tekrar denemeden önce beklenecek süre
+
+
+def _auth_key(host: str, username: str, password: str) -> str:
+    return hashlib.sha256(f"{host}\0{username}\0{password}".encode()).hexdigest()
+
+
+def clear_auth_failures() -> None:
+    with _AUTH_LOCK:
+        _AUTH_FAILURES.clear()
 
 
 class F5Client:
@@ -57,13 +74,33 @@ class F5Client:
                 raise F5Error(f"{self.host}: kullanıcı adı/parola boş - config.yaml'daki "
                               "${F5_USER}/${F5_PASS} değişkenleri .env'de tanımlı mı? "
                               "(veya username/password değerlerini doğrudan yazın)")
+            key = _auth_key(self.host, self.username, self.password)
+            with _AUTH_LOCK:
+                prev = _AUTH_FAILURES.get(key)
+            if prev and time.time() - prev[0] < AUTH_RETRY_AFTER:
+                left = int((AUTH_RETRY_AFTER - (time.time() - prev[0])) / 60) + 1
+                raise F5Error(
+                    f"{self.host}: bu kullanıcı adı/parola ile giriş daha önce reddedildi ({prev[1]}). "
+                    f"Hesabın kilitlenmemesi için tekrar denenmedi. Bilgileri/kilidi düzeltip servisi "
+                    f"yeniden başlatın ya da ~{left} dk sonra tekrar deneyin.")
             r = self.session.post(
                 f"{self.host}/mgmt/shared/authn/login",
                 json={"username": self.username, "password": self.password,
                       "loginProviderName": self.login_provider},
                 timeout=self.timeout)
             if r.status_code != 200:
-                raise F5Error(f"{self.host}: login başarısız ({r.status_code}) {r.text[:200]}")
+                msg = r.text[:200]
+                try:
+                    msg = r.json().get("message") or msg
+                except ValueError:
+                    pass
+                if r.status_code in (401, 403):
+                    with _AUTH_LOCK:
+                        _AUTH_FAILURES[key] = (time.time(), msg)
+                    if "maximum number of login attempts" in msg.lower():
+                        msg += (" -> Hesap cihazda kilitlenmiş. System > Users > User List'te kullanıcıyı "
+                                "seçip Unlock edin (tmsh: reset-stats auth login-failures <kullanıcı>).")
+                raise F5Error(f"{self.host}: login başarısız ({r.status_code}) {msg}")
             token = r.json()["token"]["token"]
             self.session.headers["X-F5-Auth-Token"] = token
             self._token = token
