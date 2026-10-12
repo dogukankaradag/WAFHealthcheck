@@ -53,6 +53,10 @@ class F5Client:
         with self._lock:
             if self._token and time.time() < self._token_expiry - 60:
                 return
+            if not self.username or not self.password:
+                raise F5Error(f"{self.host}: kullanıcı adı/parola boş - config.yaml'daki "
+                              "${F5_USER}/${F5_PASS} değişkenleri .env'de tanımlı mı? "
+                              "(veya username/password değerlerini doğrudan yazın)")
             r = self.session.post(
                 f"{self.host}/mgmt/shared/authn/login",
                 json={"username": self.username, "password": self.password,

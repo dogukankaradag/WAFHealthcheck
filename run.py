@@ -51,6 +51,19 @@ def main() -> None:
         fail(f"Config dosyası bulunamadı: {os.path.join(HERE, config)}")
     os.environ["F5WAF_CONFIG"] = config
 
+    from f5waf.models import Config
+    try:
+        cfg = Config.load(config)
+    except Exception as e:  # YAML hatası vb.
+        fail(f"Config okunamadı ({config}): {e}")
+    warnings = []
+    if cfg.missing_env:
+        warnings.append("Tanımsız ortam değişkeni: " + ", ".join(cfg.missing_env) +
+                        "  (.env dosyasında tanımlayın)")
+    for d in cfg.devices:
+        if not d.get("mock") and (not d.get("username") or not d.get("password")):
+            warnings.append(f"{d.get('name')}: kullanıcı adı/parola boş - tarama 401 ile başarısız olur")
+
     with socket.socket() as s:
         if s.connect_ex(("127.0.0.1", port)) == 0:
             fail(f"{port} portu başka bir uygulama tarafından kullanılıyor.\n"
@@ -63,6 +76,8 @@ def main() -> None:
     print(f"  Adres  : http://localhost:{port}")
     print(f"  API    : http://localhost:{port}/api/docs")
     print("  Durdurmak için Ctrl+C")
+    for w in warnings:
+        print(f"  [UYARI] {w}")
     print("=" * 60)
 
     import uvicorn

@@ -432,3 +432,21 @@ def test_policy_inventory(client):
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(c.get("/api/report/xlsx", headers=H).content))
     assert wb["ASM Policyler"].max_row == st["total"] + 1
+
+
+def test_dotenv_autoload_and_empty_credentials(tmp_path, monkeypatch):
+    from f5waf.client import F5Client, F5Error
+    from f5waf.models import Config
+    monkeypatch.delenv("HC_TEST_USER", raising=False)
+    monkeypatch.delenv("HC_TEST_PASS", raising=False)
+    monkeypatch.delenv("HC_TEST_GONE", raising=False)
+    (tmp_path / ".env").write_text('# yorum\nHC_TEST_USER=wafhc\nexport HC_TEST_PASS="p#ss=1"\n', encoding="utf-8")
+    (tmp_path / "c.yaml").write_text(
+        "defaults: {username: '${HC_TEST_USER}', password: '${HC_TEST_PASS}'}\n"
+        "devices: [{name: a, host: 1.1.1.1}, {name: b, host: 1.1.1.2, password: '${HC_TEST_GONE}'}]\n",
+        encoding="utf-8")
+    cfg = Config.load(str(tmp_path / "c.yaml"))
+    assert cfg.devices[0]["username"] == "wafhc" and cfg.devices[0]["password"] == "p#ss=1"
+    assert cfg.missing_env == ["HC_TEST_GONE"]
+    with pytest.raises(F5Error, match="boş"):
+        F5Client("1.1.1.2", "wafhc", "").login()

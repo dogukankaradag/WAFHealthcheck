@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import logging
 import os
 import re
 from dataclasses import asdict, dataclass, field
@@ -59,9 +60,41 @@ class DeviceResult:
     asm_policies: list[dict] = field(default_factory=list)  # ASM policy envanteri
 
 
+MISSING_ENV: set[str] = set()
+
+
+def _env_lookup(m: "re.Match") -> str:
+    name = m.group(1)
+    if name not in os.environ:
+        MISSING_ENV.add(name)
+    return os.environ.get(name, "")
+
+
+def load_dotenv(path: str) -> list[str]:
+    """KEY=VALUE satırlarını okur; ortamda zaten tanımlı olanların üzerine yazmaz."""
+    loaded = []
+    if not os.path.isfile(path):
+        return loaded
+    with open(path, encoding="utf-8-sig") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            key, val = line.split("=", 1)
+            key, val = key.strip(), val.strip()
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+                val = val[1:-1]
+            if key and key not in os.environ:
+                os.environ[key] = val
+                loaded.append(key)
+    return loaded
+
+
 def _expand_env(value: Any) -> Any:
     if isinstance(value, str):
-        return re.sub(r"\$\{([A-Z0-9_]+)\}", lambda m: os.environ.get(m.group(1), ""), value)
+        return re.sub(r"\$\{([A-Za-z0-9_]+)\}", _env_lookup, value)
     if isinstance(value, dict):
         return {k: _expand_env(v) for k, v in value.items()}
     if isinstance(value, list):
@@ -101,6 +134,7 @@ class Config:
     def __init__(self, raw: dict):
         raw = _expand_env(raw or {})
         self.raw = raw
+        self.missing_env: list[str] = []
         self.devices: list[dict] = raw.get("devices", [])
         defaults = raw.get("defaults", {})
         for d in self.devices:
@@ -130,8 +164,16 @@ class Config:
 
     @classmethod
     def load(cls, path: str) -> "Config":
+        # config ile aynı klasördeki .env otomatik okunur (systemd/elle çalıştırma farkı kalmasın)
+        load_dotenv(os.path.join(os.path.dirname(os.path.abspath(path)), ".env"))
+        MISSING_ENV.clear()
         with open(path, encoding="utf-8") as f:
-            return cls(yaml.safe_load(f))
+            cfg = cls(yaml.safe_load(f))
+        for name in sorted(MISSING_ENV):
+            logging.getLogger(__name__).warning(
+                "Config'te ${%s} kullanılmış ama bu ortam değişkeni tanımlı değil (.env?) - boş değer alındı", name)
+        cfg.missing_env = sorted(MISSING_ENV)
+        return cfg
 
     # ------------------------------------------------------------ helpers
     def partition_selected(self, partition: str) -> bool:
