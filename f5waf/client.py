@@ -26,11 +26,13 @@ class F5Error(Exception):
     pass
 
 
-# Reddedilen giriş bilgileri (süreç ömrü boyunca). Aynı host+kullanıcı+parola ile tekrar tekrar
-# denenip cihazdaki hesabın kilitlenmesini (max-login-failures) önlemek için kullanılır.
-_AUTH_FAILURES: dict[str, tuple[float, str]] = {}
+# Reddedilen giriş bilgileri (süreç ömrü boyunca). Aynı host+kullanıcı+parola ile art arda çok sayıda
+# hatalı deneme yapılıp cihazdaki hesabın kilitlenmesini önlemek için kullanılır.
+# key -> [hatalı deneme sayısı, son hata zamanı, son mesaj]
+_AUTH_FAILURES: dict[str, list] = {}
 _AUTH_LOCK = threading.Lock()
-AUTH_RETRY_AFTER = 30 * 60  # sn - aynı bilgilerle tekrar denemeden önce beklenecek süre
+MAX_LOGIN_FAILURES = 10     # bu kadar hatalı denemeden sonra aynı bilgilerle denemeyi durdur (config: max_login_failures)
+AUTH_RETRY_AFTER = 30 * 60  # sn - son hatadan bu kadar sonra sayaç sıfırlanır (config: login_retry_after_min)
 
 
 def _auth_key(host: str, username: str, password: str) -> str:
@@ -47,7 +49,8 @@ class F5Client:
 
     def __init__(self, host: str, username: str, password: str, *,
                  login_provider: str = "tmos", verify_ssl: bool | str = True,
-                 timeout: int = 60, page_size: int = 500, retries: int = 3):
+                 timeout: int = 60, page_size: int = 500, retries: int = 3,
+                 max_login_failures: int = MAX_LOGIN_FAILURES, login_retry_after: int = AUTH_RETRY_AFTER):
         self.host = host.rstrip("/")
         if not self.host.startswith("http"):
             self.host = f"https://{self.host}"
@@ -57,6 +60,8 @@ class F5Client:
         self.timeout = timeout
         self.page_size = page_size
         self.retries = retries
+        self.max_login_failures = max(1, int(max_login_failures))  # 0/negatif verilirse en az 1
+        self.login_retry_after = int(login_retry_after)
         self.session = requests.Session()
         self.session.verify = verify_ssl
         if verify_ssl is False:
@@ -77,12 +82,15 @@ class F5Client:
             key = _auth_key(self.host, self.username, self.password)
             with _AUTH_LOCK:
                 prev = _AUTH_FAILURES.get(key)
-            if prev and time.time() - prev[0] < AUTH_RETRY_AFTER:
-                left = int((AUTH_RETRY_AFTER - (time.time() - prev[0])) / 60) + 1
+                if prev and time.time() - prev[1] >= self.login_retry_after:
+                    _AUTH_FAILURES.pop(key, None)   # bekleme süresi doldu, sayaç sıfır
+                    prev = None
+            if prev and prev[0] >= self.max_login_failures:
+                left = int((self.login_retry_after - (time.time() - prev[1])) / 60) + 1
                 raise F5Error(
-                    f"{self.host}: bu kullanıcı adı/parola ile giriş daha önce reddedildi ({prev[1]}). "
-                    f"Hesabın kilitlenmemesi için tekrar denenmedi. Bilgileri/kilidi düzeltip servisi "
-                    f"yeniden başlatın ya da ~{left} dk sonra tekrar deneyin.")
+                    f"{self.host}: bu kullanıcı adı/parola ile {prev[0]} kez art arda giriş reddedildi "
+                    f"(son yanıt: {prev[2]}). Hesabın kilitlenmemesi için tekrar denenmedi. Bilgileri/kilidi "
+                    f"düzeltip servisi yeniden başlatın ya da ~{left} dk sonra tekrar deneyin.")
             r = self.session.post(
                 f"{self.host}/mgmt/shared/authn/login",
                 json={"username": self.username, "password": self.password,
@@ -96,11 +104,15 @@ class F5Client:
                     pass
                 if r.status_code in (401, 403):
                     with _AUTH_LOCK:
-                        _AUTH_FAILURES[key] = (time.time(), msg)
+                        cnt = (_AUTH_FAILURES.get(key) or [0])[0] + 1
+                        _AUTH_FAILURES[key] = [cnt, time.time(), msg]
+                    msg += f" [hatalı deneme {cnt}/{self.max_login_failures}]"
                     if "maximum number of login attempts" in msg.lower():
                         msg += (" -> Hesap cihazda kilitlenmiş. System > Users > User List'te kullanıcıyı "
                                 "seçip Unlock edin (tmsh: reset-stats auth login-failures <kullanıcı>).")
                 raise F5Error(f"{self.host}: login başarısız ({r.status_code}) {msg}")
+            with _AUTH_LOCK:
+                _AUTH_FAILURES.pop(key, None)   # başarılı giriş sayacı sıfırlar
             token = r.json()["token"]["token"]
             self.session.headers["X-F5-Auth-Token"] = token
             self._token = token

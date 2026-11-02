@@ -452,11 +452,7 @@ def test_dotenv_autoload_and_empty_credentials(tmp_path, monkeypatch):
         F5Client("1.1.1.2", "wafhc", "").login()
 
 
-def test_rejected_credentials_are_not_retried(monkeypatch):
-    from f5waf import client as cmod
-    cmod.clear_auth_failures()
-    calls = []
-
+def _fake_login_client(cmod, monkeypatch, calls, password="p", **kw):
     class R:
         status_code = 401
         text = '{"code":401,"message":"Maximum number of login attempts exceeded."}'
@@ -464,18 +460,33 @@ def test_rejected_credentials_are_not_retried(monkeypatch):
         def json(self):
             return {"code": 401, "message": "Maximum number of login attempts exceeded."}
 
-    c = cmod.F5Client("10.0.0.1", "u", "p", verify_ssl=False)
+    c = cmod.F5Client("10.0.0.1", "u", password, verify_ssl=False, **kw)
     monkeypatch.setattr(c.session, "post", lambda *a, **k: calls.append(1) or R())
-    with pytest.raises(cmod.F5Error, match="Unlock"):
-        c.login()
-    c2 = cmod.F5Client("10.0.0.1", "u", "p", verify_ssl=False)
-    monkeypatch.setattr(c2.session, "post", lambda *a, **k: calls.append(1) or R())
+    return c
+
+
+def test_rejected_credentials_retry_limit(monkeypatch):
+    from f5waf import client as cmod
+    cmod.clear_auth_failures()
+    calls = []
+    for n in range(1, 11):                       # varsayılan: 10 hatalı denemeye kadar cihaza gider
+        with pytest.raises(cmod.F5Error, match=f"hatalı deneme {n}/10"):
+            _fake_login_client(cmod, monkeypatch, calls).login()
+    assert len(calls) == 10
+    with pytest.raises(cmod.F5Error, match="tekrar denenmedi"):   # 11. deneme cihaza gitmez
+        _fake_login_client(cmod, monkeypatch, calls).login()
+    assert len(calls) == 10
+    with pytest.raises(cmod.F5Error, match="1/10"):               # parola değişince yeniden denenir
+        _fake_login_client(cmod, monkeypatch, calls, password="yeni").login()
+    assert len(calls) == 11
+    cmod.clear_auth_failures()
+    for _ in range(2):                                            # limit config'ten ayarlanabilir
+        with pytest.raises(cmod.F5Error):
+            _fake_login_client(cmod, monkeypatch, calls, max_login_failures=2).login()
     with pytest.raises(cmod.F5Error, match="tekrar denenmedi"):
-        c2.login()
-    assert len(calls) == 1          # ikinci tarama cihaza hiç gitmedi
-    c3 = cmod.F5Client("10.0.0.1", "u", "yeni", verify_ssl=False)   # parola değişince denenir
-    monkeypatch.setattr(c3.session, "post", lambda *a, **k: calls.append(1) or R())
-    with pytest.raises(cmod.F5Error):
-        c3.login()
-    assert len(calls) == 2
+        _fake_login_client(cmod, monkeypatch, calls, max_login_failures=2).login()
+    with pytest.raises(cmod.F5Error, match="3/5"):               # limit yükseltilince kaldığı yerden devam
+        _fake_login_client(cmod, monkeypatch, calls, max_login_failures=5).login()
+    with pytest.raises(cmod.F5Error, match="1/2"):               # bekleme süresi dolunca sayaç sıfırlanır
+        _fake_login_client(cmod, monkeypatch, calls, max_login_failures=2, login_retry_after=0).login()
     cmod.clear_auth_failures()

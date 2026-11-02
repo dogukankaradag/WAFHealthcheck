@@ -7,6 +7,8 @@ defaults:
   login_provider: tmos          # RADIUS/TACACS/LDAP ise ilgili provider adı
   verify_ssl: true              # self-signed ise false ya da CA bundle yolu: /path/ca.pem
   timeout: 60
+  max_login_failures: 10        # aynı bilgilerle art arda bu kadar hatalı girişten sonra uygulama denemeyi durdurur
+  login_retry_after_min: 30     # son hatalı girişten bu kadar dk sonra sayaç sıfırlanır (servis restart'ı da sıfırlar)
 
 devices:
   - name: waf01

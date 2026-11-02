@@ -86,7 +86,9 @@ def make_client(dev: dict) -> F5Client:
         verify = False
     return F5Client(dev["host"], dev["username"], dev["password"],
                     login_provider=dev.get("login_provider", "tmos"), verify_ssl=verify,
-                    timeout=int(dev.get("timeout", 60)))
+                    timeout=int(dev.get("timeout", 60)),
+                    max_login_failures=int(dev.get("max_login_failures", 10)),
+                    login_retry_after=int(float(dev.get("login_retry_after_min", 30)) * 60))
 
 
 class Scanner:

@@ -68,6 +68,8 @@ tmsh create auth user waf_audit password '***' partition-access add { all-partit
 ```
 Araç yalnızca GET isteği yapar. Tek istisna, kendi login token'ının ömrünü uzatmak için gönderdiği PATCH isteğidir.
 
+**Hatalı giriş koruması:** Aynı cihaz + kullanıcı adı + parola ile art arda `max_login_failures` (varsayılan 10) hatalı girişten sonra uygulama o cihaza giriş denemesini durdurur. Sayaç başarılı girişte, `login_retry_after_min` (varsayılan 30 dk) sonra veya servis yeniden başlatılınca sıfırlanır. Bu değer cihazdaki kilit limitinden (`tmsh list auth password-policy max-login-failures`) küçük olmalıdır; aksi halde hesap cihazda kilitlenir.
+
 ### Kimlik bilgileri
 Şifreleri config dosyasına yazmayın, ortam değişkeninden verin:
 ```powershell
