@@ -528,3 +528,16 @@ def test_401_on_endpoint_relogins_once(monkeypatch):
     with pytest.raises(cmod.F5Error, match="yetki"):
         c.get("/mgmt/tm/sys/version")
     assert len(posts) == 2 and len(gets) == 2   # ilk login + tek yeniden login
+
+
+def test_check_access_reports_without_login(tmp_path, monkeypatch, capsys):
+    import cli
+    monkeypatch.delenv("CA_USER", raising=False)
+    (tmp_path / ".env").write_bytes(b"CA_USER=wafhc\r\n")
+    (tmp_path / "c.yaml").write_text(
+        "defaults: {username: '${CA_USER}', password: '${CA_MISSING}'}\ndevices: [{name: d1, host: 1.1.1.1}]\n",
+        encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["cli", "check-access", "-c", str(tmp_path / "c.yaml")])
+    cli.main()
+    out = capsys.readouterr().out
+    assert "CRLF" in out and "TANIMSIZ" in out and "'wafhc'" in out and "BOŞ" in out
