@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from .client import F5Client, F5Error
+from .client import F5AuthError, F5Client, F5Error
 
 log = logging.getLogger(__name__)
 
@@ -102,6 +102,8 @@ class Collector:
     def _safe(self, snap: DeviceSnapshot, label: str, fn, default):
         try:
             return fn()
+        except F5AuthError:
+            raise                      # giriş hatası: diğer adımlar denenmesin (hesap kilitlenmesin)
         except F5Error as e:
             snap.warnings.append(f"{label}: {e}")
             log.warning("%s %s: %s", self.name, label, e)
@@ -192,6 +194,8 @@ class Collector:
         def grab(label, fn, default):
             try:
                 return fn()
+            except F5AuthError:
+                raise
             except F5Error as e:
                 pd.errors.append(f"{label}: {e}")
                 return default

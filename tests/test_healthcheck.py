@@ -490,3 +490,41 @@ def test_rejected_credentials_retry_limit(monkeypatch):
     with pytest.raises(cmod.F5Error, match="1/2"):               # bekleme süresi dolunca sayaç sıfırlanır
         _fake_login_client(cmod, monkeypatch, calls, max_login_failures=2, login_retry_after=0).login()
     cmod.clear_auth_failures()
+
+
+def test_failed_login_stops_collection_after_one_attempt(monkeypatch):
+    """Giriş reddedilince toplama durmalı: tarama başına cihaza tek login denemesi gitmeli."""
+    from f5waf import client as cmod
+    from f5waf.collector import Collector
+    cmod.clear_auth_failures()
+    calls = []
+    c = _fake_login_client(cmod, monkeypatch, calls, password="kilit")
+    with pytest.raises(cmod.F5AuthError):
+        Collector(c, "waf").collect()
+    assert len(calls) == 1
+    cmod.clear_auth_failures()
+
+
+def test_401_on_endpoint_relogins_once(monkeypatch):
+    from f5waf import client as cmod
+    cmod.clear_auth_failures()
+    posts, gets = [], []
+
+    class Tok:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"token": {"token": f"t{len(posts)}"}}
+
+    class Deny:
+        status_code = 401
+        text = "Authorization failed"
+
+    c = cmod.F5Client("10.0.0.2", "u", "p", verify_ssl=False)
+    monkeypatch.setattr(c.session, "post", lambda *a, **k: posts.append(1) or Tok())
+    monkeypatch.setattr(c.session, "patch", lambda *a, **k: Deny())
+    monkeypatch.setattr(c.session, "get", lambda *a, **k: gets.append(1) or Deny())
+    with pytest.raises(cmod.F5Error, match="yetki"):
+        c.get("/mgmt/tm/sys/version")
+    assert len(posts) == 2 and len(gets) == 2   # ilk login + tek yeniden login

@@ -26,6 +26,10 @@ class F5Error(Exception):
     pass
 
 
+class F5AuthError(F5Error):
+    """Giriş başarısız. Toplama hemen durmalı; her adımda yeniden denemek hesabı kilitler."""
+
+
 # Reddedilen giriş bilgileri (süreç ömrü boyunca). Aynı host+kullanıcı+parola ile art arda çok sayıda
 # hatalı deneme yapılıp cihazdaki hesabın kilitlenmesini önlemek için kullanılır.
 # key -> [hatalı deneme sayısı, son hata zamanı, son mesaj]
@@ -76,7 +80,7 @@ class F5Client:
             if self._token and time.time() < self._token_expiry - 60:
                 return
             if not self.username or not self.password:
-                raise F5Error(f"{self.host}: kullanıcı adı/parola boş - config.yaml'daki "
+                raise F5AuthError(f"{self.host}: kullanıcı adı/parola boş - config.yaml'daki "
                               "${F5_USER}/${F5_PASS} değişkenleri .env'de tanımlı mı? "
                               "(veya username/password değerlerini doğrudan yazın)")
             key = _auth_key(self.host, self.username, self.password)
@@ -87,7 +91,7 @@ class F5Client:
                     prev = None
             if prev and prev[0] >= self.max_login_failures:
                 left = int((self.login_retry_after - (time.time() - prev[1])) / 60) + 1
-                raise F5Error(
+                raise F5AuthError(
                     f"{self.host}: bu kullanıcı adı/parola ile {prev[0]} kez art arda giriş reddedildi "
                     f"(son yanıt: {prev[2]}). Hesabın kilitlenmemesi için tekrar denenmedi. Bilgileri/kilidi "
                     f"düzeltip servisi yeniden başlatın ya da ~{left} dk sonra tekrar deneyin.")
@@ -110,7 +114,7 @@ class F5Client:
                     if "maximum number of login attempts" in msg.lower():
                         msg += (" -> Hesap cihazda kilitlenmiş. System > Users > User List'te kullanıcıyı "
                                 "seçip Unlock edin (tmsh: reset-stats auth login-failures <kullanıcı>).")
-                raise F5Error(f"{self.host}: login başarısız ({r.status_code}) {msg}")
+                raise F5AuthError(f"{self.host}: login başarısız ({r.status_code}) {msg}")
             with _AUTH_LOCK:
                 _AUTH_FAILURES.pop(key, None)   # başarılı giriş sayacı sıfırlar
             token = r.json()["token"]["token"]
@@ -147,6 +151,7 @@ class F5Client:
         self.login()
         url = self._url(path)
         last_exc: Exception | None = None
+        relogged = False
         for attempt in range(1, self.retries + 1):
             try:
                 r = self.session.get(url, params=params, timeout=self.timeout)
@@ -155,6 +160,9 @@ class F5Client:
                 time.sleep(attempt * 2)
                 continue
             if r.status_code == 401:
+                if relogged:   # yeni token ile de 401: süre değil yetki sorunu - tekrar login yapma
+                    raise F5Error(f"GET {path} -> 401 (yetki yok?) {r.text[:200]}")
+                relogged = True
                 self._token = None
                 self.login()
                 continue
